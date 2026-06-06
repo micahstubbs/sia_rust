@@ -1,0 +1,7 @@
+{
+  "name": "sia_rust",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "@micahstubbs <git@micah.fyi>",
+  "license": "UNLICENSED"
+}
