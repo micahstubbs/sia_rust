@@ -4,9 +4,12 @@
 # own [package] and no [workspace] inheritance, so it builds in isolation with
 # `cd evals && cargo build`. The repo-root crate stays independently buildable.
 #
-# If/when the root `sia` crate exposes reusable types, add:
+# The root `sia` crate now exposes a library (`src/lib.rs`), so this crate may depend
+# on it for reusable types with:
 #   sia = { path = ".." }
-# It is omitted here because the root crate has no `src/` lib target yet.
+# It is omitted because the eval harness is intentionally self-contained (it mirrors
+# the bundled evaluate.py scoring rather than importing SIA internals); add the path
+# dependency if a future eval needs to reuse SIA types directly.
 
 [package]
 name = "sia-evals"

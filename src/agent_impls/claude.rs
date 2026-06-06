@@ -9,6 +9,8 @@ use crate::error::{SiaError, SiaResult};
 
 pub fn run_agent_claude(_args: &RunArgs) -> SiaResult<()> {
     Err(SiaError::new(
-        "claude agent impl requires the Claude Agent SDK, which is not available in the Rust port",
+        "the native `claude` agent runner is not yet implemented (tracked in issue #39). \
+         The registry, dispatch, and model resolution are ported; the Anthropic Messages \
+         API tool-loop is pending, so `sia run`'s meta/feedback agents are not yet end-to-end.",
     ))
 }

@@ -101,7 +101,12 @@ impl Config {
 
     /// Create a `Config` with overrides from `SIA_*` environment variables.
     ///
-    /// Mirrors the Python `env_map`: an unparseable value leaves the default in place.
+    /// The recognized set mirrors the Python `env_map` **exactly** (8 vars), for
+    /// parity: honoring more `SIA_*` keys here than `sia/config.py` does would make
+    /// the Rust port diverge from the reference. An unparseable value leaves the
+    /// default in place (matching Python's `contextlib.suppress(ValueError, TypeError)`).
+    /// Extending the override surface is a separate enhancement that must land in the
+    /// Python source first so both stay in lockstep (`tests/config_env.rs`).
     pub fn from_env() -> Config {
         let mut cfg = Config::default();
         if let Some(v) = env_str("SIA_META_AGENT_PROFILE") {

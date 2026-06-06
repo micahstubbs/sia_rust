@@ -49,11 +49,18 @@ and the web `index.html` are embedded at build time).
 The meta/feedback agent runners (`claude` / `openhands` / `pydantic-ai`) wrap
 external LLM SDKs that have no Rust equivalent. The registry, dispatch, and
 model-spec resolution (`resolve_model`) are ported and tested; the actual LLM
-call is the documented boundary and surfaces a clear error in this port. The
-**target agent** runs as a real Python subprocess (`std::process`), and the web
-visualizer, prompts, context tracking, evaluation flow, and CLI are fully
-functional. The Python `sia/tasks/` reference agents + evaluators are task *data*
-(read/executed by the agents) and remain unchanged.
+call is the documented boundary and surfaces a clear error in this port (native
+runners are tracked in #38–#41). The **target agent** runs as a real Python
+subprocess (`std::process`).
+
+What is functional today: `sia web` (the visualizer) end-to-end; the deterministic
+orchestration scaffolding (`sia run` up to the meta-agent call — task resolution,
+profile/provider loading, run-directory + venv setup, prompt building, target-agent
+subprocess execution, evaluation, context tracking, feedback context); and the CLI
+parsing/dispatch. What is **not yet end-to-end**: a full `sia run` self-improvement
+loop, because the meta/feedback agents need a native LLM runner (#38–#41) — it stops
+with a clear error at the first LLM call. The Python `sia/tasks/` reference agents +
+evaluators are task *data* (read/executed by the agents) and remain unchanged.
 
 ## Parity, benchmarks & evals
 

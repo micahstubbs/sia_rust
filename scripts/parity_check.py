@@ -75,7 +75,8 @@ def test_json_dumps() -> None:
         "empty_list": [],
         "nested": [{"role": "user", "content": "café ☕", "k": [1, 2, {"z": "汉字"}]}],
         "floats": {"a": 0.9, "b": 1.0, "c": 50.0, "d": 0.1},
-        "ints": {"big": 10_000_000_000, "neg": -5, "zero": 0},
+        "floats_sci": {"tiny": 1e-7, "tiny2": 1.5e-7, "big": 1e16, "bigger": 1e20, "norm": 2.5e-3},
+        "ints": {"big": 10_000_000_000, "huge": 9_007_199_254_740_993, "neg": -5, "zero": 0},
         "bools_null": {"t": True, "f": False, "n": None},
         "lawbench_like": {
             "messages": [

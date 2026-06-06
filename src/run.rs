@@ -31,9 +31,13 @@ pub fn run_web(args: &ArgMatches) -> SiaResult<()> {
 
 /// `sia run`: the self-improvement loop.
 ///
-/// Mirrors `sia.orchestrator.main`. The meta/feedback/target agents are driven via
-/// the agent-impl registry; the meta/feedback runners require an external LLM SDK
-/// (the documented integration boundary) and surface an error there in this port.
+/// Mirrors `sia.orchestrator.main`. Everything up to the meta-agent call is wired and
+/// functional: task resolution, profile/provider loading, run-directory + venv setup,
+/// the meta prompt, and the per-generation scaffolding (target-agent subprocess
+/// execution, evaluation, context tracking, feedback context). The **meta/feedback
+/// agents** are dispatched through the agent-impl registry, whose native runners are
+/// not yet implemented (tracked in #38–#41) — so a full `sia run` stops with a clear
+/// error at the first LLM call. `sia web` is fully functional today.
 pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()> {
     let max_gen = *args
         .get_one::<i64>("max_gen")

@@ -28,10 +28,7 @@ fn write_value(out: &mut String, value: &Value, level: usize) {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        // serde_json's number formatting matches Python's for the magnitudes SIA
-        // handles (integers exact; decimals via shortest round-trip). Very large
-        // exponent-notation floats are a documented edge case.
-        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::Number(n) => out.push_str(&format_number(n)),
         Value::String(s) => write_string(out, s),
         Value::Array(arr) => {
             if arr.is_empty() {
@@ -72,6 +69,35 @@ fn write_value(out: &mut String, value: &Value, level: usize) {
             out.push('}');
         }
     }
+}
+
+/// Format a JSON number like Python's `json.dumps`.
+///
+/// serde_json and CPython both use shortest round-trip formatting and agree on
+/// integers, ordinary decimals, and ≥2-digit exponents. They differ in one place:
+/// CPython zero-pads a scientific-notation exponent to at least two digits
+/// (`1e-7` → `1e-07`), serde does not. We normalize that so non-ASCII *and* numeric
+/// output match Python byte-for-byte across the full range.
+fn format_number(n: &serde_json::Number) -> String {
+    pad_exponent(&n.to_string())
+}
+
+fn pad_exponent(s: &str) -> String {
+    let Some(epos) = s.find(['e', 'E']) else {
+        return s.to_string();
+    };
+    let mantissa = &s[..epos];
+    let exp = &s[epos + 1..];
+    let (sign, digits) = match exp.strip_prefix('-') {
+        Some(d) => ('-', d),
+        None => ('+', exp.strip_prefix('+').unwrap_or(exp)),
+    };
+    let digits = if digits.len() < 2 {
+        format!("{digits:0>2}")
+    } else {
+        digits.to_string()
+    };
+    format!("{mantissa}e{sign}{digits}")
 }
 
 /// Encode a string exactly like Python's `c_encode_basestring_ascii`.
@@ -169,6 +195,27 @@ mod tests {
             dumps_indent2(&json!({"a": 0.9, "b": 1.0, "c": 50.0})),
             "{\n  \"a\": 0.9,\n  \"b\": 1.0,\n  \"c\": 50.0\n}"
         );
+    }
+
+    #[test]
+    fn test_number_formatting_matches_python() {
+        // Captured from CPython json.dumps. Integers exact; decimals shortest
+        // round-trip; scientific exponents zero-padded to >= 2 digits.
+        assert_eq!(
+            dumps_indent2(&json!(1_000_000_000_000_000_i64)),
+            "1000000000000000"
+        );
+        assert_eq!(
+            dumps_indent2(&json!(9_007_199_254_740_993_i64)),
+            "9007199254740993"
+        );
+        assert_eq!(dumps_indent2(&json!(0.123456789)), "0.123456789");
+        assert_eq!(dumps_indent2(&json!(12345.678)), "12345.678");
+        assert_eq!(dumps_indent2(&json!(1e16)), "1e+16");
+        assert_eq!(dumps_indent2(&json!(1e20)), "1e+20");
+        assert_eq!(dumps_indent2(&json!(1e-7)), "1e-07");
+        assert_eq!(dumps_indent2(&json!(1.5e-7)), "1.5e-07");
+        assert_eq!(dumps_indent2(&json!(2.5e-3)), "0.0025");
     }
 
     #[test]

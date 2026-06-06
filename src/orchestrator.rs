@@ -312,29 +312,54 @@ pub fn build_target_cmd(
 }
 
 /// Run `cmd`, streaming merged stdout/stderr to the console and a log file. Returns exit code.
+///
+/// Python's `_stream_to_log` runs the child with `stderr=STDOUT` (merged) and drains
+/// the single pipe. We pipe stdout and stderr separately and drain **both
+/// concurrently** on their own threads, writing both into the same log + console.
+/// Draining concurrently is essential: a target agent that writes more than a pipe
+/// buffer (~64 KiB) to stderr would otherwise block forever while we only read
+/// stdout. Merging stderr into the log also preserves failure diagnostics (the
+/// feedback prompt's "last 10 lines of output" come from this log).
 pub fn stream_to_log(cmd: &[String], stdout_log_file: &str) -> std::io::Result<i32> {
-    use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
+    use std::sync::{Arc, Mutex};
 
-    let mut log_fh = std::fs::File::create(stdout_log_file)?;
+    let log_fh = std::fs::File::create(stdout_log_file)?;
     let mut child = Command::new(&cmd[0])
         .args(&cmd[1..])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Merge stderr into stdout by reading both; simplest is to redirect stderr to stdout
-    // via a piped reader. Here we read stdout (stderr piped separately) line by line.
-    if let Some(out) = child.stdout.take() {
-        let reader = BufReader::new(out);
-        for line in reader.lines() {
-            let line = line?;
-            println!("{line}");
-            writeln!(log_fh, "{line}")?;
-        }
-    }
+    let log = Arc::new(Mutex::new(log_fh));
+    let h_out = pump_to_log(child.stdout.take(), Arc::clone(&log));
+    let h_err = pump_to_log(child.stderr.take(), Arc::clone(&log));
+    // Join the pumps before wait(): the pipes close on child exit, so the threads
+    // finish, and only then do we reap the process.
+    h_out.join().expect("stdout pump thread panicked")?;
+    h_err.join().expect("stderr pump thread panicked")?;
+
     let status = child.wait()?;
     Ok(status.code().unwrap_or(-1))
+}
+
+/// Drain a child stream line-by-line to the console and the shared (merged) log.
+fn pump_to_log<R: std::io::Read + Send + 'static>(
+    stream: Option<R>,
+    log: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
+) -> std::thread::JoinHandle<std::io::Result<()>> {
+    use std::io::{BufRead, BufReader};
+    std::thread::spawn(move || -> std::io::Result<()> {
+        if let Some(s) = stream {
+            for line in BufReader::new(s).lines() {
+                let line = line?;
+                println!("{line}");
+                let mut fh = log.lock().unwrap();
+                writeln!(fh, "{line}")?;
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Process runner seam: `(cmd, stdout_log_file) -> exit code`.

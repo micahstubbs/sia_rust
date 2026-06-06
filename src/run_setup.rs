@@ -73,7 +73,15 @@ fn which(program: &str) -> bool {
 /// Create a virtual environment and install packages.
 fn create_venv(venv_dir: &str, packages: &[&str]) -> SiaResult<()> {
     let status = if uv_available() {
-        let _ = Command::new("uv").args(["venv", venv_dir]).status();
+        let venv_status = Command::new("uv")
+            .args(["venv", venv_dir])
+            .status()
+            .map_err(|e| SiaError::new(format!("uv venv failed: {e}")))?;
+        if !venv_status.success() {
+            return Err(SiaError::new(
+                "uv venv returned non-zero; aborting venv setup",
+            ));
+        }
         let mut cmd = Command::new("uv");
         cmd.args(["pip", "install", "--python", &venv_python_path(venv_dir)]);
         cmd.args(packages);
@@ -81,9 +89,12 @@ fn create_venv(venv_dir: &str, packages: &[&str]) -> SiaResult<()> {
     } else {
         let venv_status = Command::new("python3")
             .args(["-m", "venv", venv_dir])
-            .status();
-        if let Err(e) = venv_status {
-            return Err(SiaError::new(format!("venv creation failed: {e}")));
+            .status()
+            .map_err(|e| SiaError::new(format!("venv creation failed: {e}")))?;
+        if !venv_status.success() {
+            return Err(SiaError::new(
+                "python -m venv returned non-zero; aborting venv setup",
+            ));
         }
         let mut cmd = Command::new(venv_pip_path(venv_dir));
         cmd.arg("install");

@@ -22,7 +22,9 @@ pub fn resolve_model(model_name: &str, _provider: Option<&Provider>) -> String {
 pub fn run_agent_pydantic_ai(args: &RunArgs) -> SiaResult<()> {
     let _model = resolve_model(&args.model_name, args.provider.as_ref());
     Err(SiaError::new(
-        "pydantic-ai agent impl requires the PydanticAI SDK, which is not available in the Rust port",
+        "the native `pydantic-ai`-style agent runner is not yet implemented (tracked in issue #41). \
+         The registry, dispatch, and model resolution are ported; the rig/dspy-rs tool-agent is \
+         pending, so `sia run`'s meta/feedback agents are not yet end-to-end.",
     ))
 }
 

@@ -35,7 +35,9 @@ pub fn resolve_model(model_name: &str, provider: Option<&Provider>) -> String {
 pub fn run_agent_openhands(args: &RunArgs) -> SiaResult<()> {
     let _model = resolve_model(&args.model_name, args.provider.as_ref());
     Err(SiaError::new(
-        "openhands agent impl requires the OpenHands SDK, which is not available in the Rust port",
+        "the native `openhands`-style agent runner is not yet implemented (tracked in issue #40). \
+         The registry, dispatch, and model resolution are ported; the multi-provider tool-loop is \
+         pending, so `sia run`'s meta/feedback agents are not yet end-to-end.",
     ))
 }
 
