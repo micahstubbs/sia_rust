@@ -416,7 +416,8 @@ pub fn run_target_agent(
 // --------------------------------------------------------------------------- //
 
 fn json_pretty(value: &Value) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string())
+    // ensure_ascii=True, matching Python json.dumps for non-ASCII (e.g. LawBench).
+    crate::pyjson::dumps_indent2(value)
 }
 
 fn truncate_chars(s: &str, limit: usize, suffix: &str) -> String {

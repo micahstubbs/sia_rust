@@ -18,6 +18,7 @@ pub mod profiles;
 pub mod prompts;
 pub mod providers;
 pub mod pyfmt;
+pub mod pyjson;
 pub mod results;
 pub mod run;
 pub mod run_setup;

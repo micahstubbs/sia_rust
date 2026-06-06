@@ -10,6 +10,12 @@ default-run = "sia"
 name = "sia"
 path = "src/bin/sia.rs"
 
+# Differential-parity helper: emits the Rust output for an operation given a JSON
+# request on stdin, so scripts/parity_check.py can diff Rust vs Python (issue #29).
+[[bin]]
+name = "sia-parity"
+path = "src/bin/sia_parity.rs"
+
 [lib]
 name = "sia"
 path = "src/lib.rs"

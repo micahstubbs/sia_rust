@@ -7,10 +7,10 @@
 use crate::providers::Provider;
 use crate::task_files::TaskFiles;
 
-/// `json.dumps(value, indent=2)` — serde's pretty printer matches Python's 2-space
-/// indent and `: ` separators (with `preserve_order` keeping object key order).
+/// `json.dumps(value, indent=2)` (ensure_ascii=True) — non-ASCII task data (e.g.
+/// LawBench, which is Chinese) is escaped exactly as CPython does.
 fn json_pretty(value: &serde_json::Value) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string())
+    crate::pyjson::dumps_indent2(value)
 }
 
 /// The reference paragraph of the meta prompt.
