@@ -189,6 +189,21 @@ mod tests {
     }
 
     #[test]
+    fn test_deepseek_nebius_target_profile_resolves_provider() {
+        let p = load_target_agent_profile("deepseek-nebius-target").unwrap();
+        assert_eq!(p.agent_reference.kind, "default");
+        assert_eq!(p.model, "deepseek-ai/DeepSeek-R1-0528");
+        assert_eq!(p.provider.provider_id, "nebius");
+        assert_eq!(p.provider.client_kind, "openai");
+        assert!(p
+            .provider
+            .base_url
+            .as_deref()
+            .unwrap()
+            .ends_with("nebius.com/v1/"));
+    }
+
+    #[test]
     fn test_unknown_profile_raises() {
         assert!(load_meta_agent_profile("nope").is_err());
     }
