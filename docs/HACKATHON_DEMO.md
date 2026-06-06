@@ -387,4 +387,5 @@ agents.
 
 ---
 
-*Linked from [README.md](../README.md) and [docs/RUST_PORT.md](RUST_PORT.md).*
+*Linked from [README.md](../README.md) and [docs/RUST_PORT.md](RUST_PORT.md).
+Companion deck outline + reproducibility one-pager: [docs/HACKATHON_DECK.md](HACKATHON_DECK.md).*
