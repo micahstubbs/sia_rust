@@ -42,6 +42,7 @@ use serde_json::{json, Value};
 
 use crate::config::Config;
 use crate::error::{SiaError, SiaResult};
+use crate::sandbox::{Capabilities, CapabilityError};
 
 use super::openai_api::{
     ChatMessage, ChatRequest, ChatResponse, ChatTool, ChatTransport, ToolCall,
@@ -208,16 +209,35 @@ fn tool_defs() -> Vec<ChatTool> {
     ]
 }
 
+/// Render a capability denial as an `Error:`-prefixed tool-result string so it
+/// flows back to the model exactly like any other tool error (issue #89).
+fn deny(err: CapabilityError) -> String {
+    format!("{} {err}", tools::ERROR_PREFIX)
+}
+
 /// Execute one tool call against the sandboxed executors, returning
 /// `(observation_name, result_text)`.
-fn execute_tool_call(working_dir: &Path, call: &ToolCall, shell_timeout: u64) -> (String, String) {
+///
+/// Every model-invoked tool call is first checked against the agent's
+/// [`Capabilities`] allow-list (issue #89): the relevant `check_*` runs *before*
+/// the [`tools`] executor, and a denial is returned as an `Error:`-prefixed
+/// string without touching the filesystem or spawning a process.
+fn execute_tool_call(
+    caps: &Capabilities,
+    working_dir: &Path,
+    call: &ToolCall,
+    shell_timeout: u64,
+) -> (String, String) {
     let args: Value = serde_json::from_str(&call.function.arguments).unwrap_or_else(|_| json!({}));
     let s = |key: &str| -> Option<&str> { args.get(key).and_then(|v| v.as_str()) };
 
     match call.function.name.as_str() {
         "terminal" => {
             let result = match s("command") {
-                Some(cmd) => tools::bash(working_dir, cmd, shell_timeout),
+                Some(cmd) => match caps.check_bash(cmd) {
+                    Ok(()) => tools::bash(working_dir, cmd, shell_timeout),
+                    Err(e) => deny(e),
+                },
                 None => format!(
                     "{} terminal requires a 'command' string",
                     tools::ERROR_PREFIX
@@ -228,20 +248,33 @@ fn execute_tool_call(working_dir: &Path, call: &ToolCall, shell_timeout: u64) ->
         "file_editor" => {
             let result = match s("command") {
                 Some("view") => match s("path") {
-                    Some(path) => tools::read_file(working_dir, path),
+                    Some(path) => match caps.check_read(path) {
+                        Ok(()) => tools::read_file(working_dir, path),
+                        Err(e) => deny(e),
+                    },
                     None => format!("{} file_editor view requires a 'path'", tools::ERROR_PREFIX),
                 },
                 Some("create") => match (s("path"), s("file_text")) {
-                    (Some(path), Some(text)) => tools::write_file(working_dir, path, text),
+                    (Some(path), Some(text)) => match caps
+                        .check_write(path)
+                        .and_then(|()| caps.check_size(text.len() as u64))
+                    {
+                        Ok(()) => tools::write_file(working_dir, path, text),
+                        Err(e) => deny(e),
+                    },
                     _ => format!(
                         "{} file_editor create requires 'path' and 'file_text'",
                         tools::ERROR_PREFIX
                     ),
                 },
                 Some("str_replace") => match (s("path"), s("old_str"), s("new_str")) {
-                    (Some(path), Some(old), Some(new)) => {
-                        tools::edit_file(working_dir, path, old, new)
-                    }
+                    (Some(path), Some(old), Some(new)) => match caps
+                        .check_write(path)
+                        .and_then(|()| caps.check_size(new.len() as u64))
+                    {
+                        Ok(()) => tools::edit_file(working_dir, path, old, new),
+                        Err(e) => deny(e),
+                    },
                     _ => format!(
                         "{} file_editor str_replace requires 'path', 'old_str', and 'new_str'",
                         tools::ERROR_PREFIX
@@ -348,7 +381,9 @@ pub fn run_openhands_agent(
         // Append the assistant message (with its tool calls) to the conversation.
         messages.push(assistant.clone());
 
-        // Execute each tool call, write action + observation events, feed results back.
+        // Execute each tool call, write action + observation events, feed results
+        // back. Every call is gated by the agent's capability allow-list (#89).
+        let caps = Capabilities::agent_default(wd);
         for call in &assistant.tool_calls {
             metrics.num_tool_calls += 1;
             let args: Value =
@@ -361,7 +396,7 @@ pub fn run_openhands_agent(
             let action_msg = format!("{}({})", call.function.name, call.function.arguments);
             log.agent_action(action_name, &call.id, args, &action_msg)?;
 
-            let (observation, result) = execute_tool_call(wd, call, config.shell_timeout);
+            let (observation, result) = execute_tool_call(&caps, wd, call, config.shell_timeout);
             log.environment_observation(&observation, &call.id, &result)?;
 
             messages.push(ChatMessage::tool_result(&call.id, &result));
@@ -685,5 +720,86 @@ mod tests {
         )
         .expect("live run should succeed");
         assert!(summary.events_written > 0);
+    }
+
+    // --- Capability allow-list enforcement (issue #89) ---
+
+    fn tool_call(name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: "call_0".to_string(),
+            kind: "function".to_string(),
+            function: FunctionCall {
+                name: name.to_string(),
+                arguments: arguments.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn dispatch_denies_bash_when_capability_disallows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        // A restrictive profile with bash disabled.
+        let mut caps = Capabilities::agent_default(wd);
+        caps.allow_bash = false;
+
+        let call = tool_call(
+            "terminal",
+            r#"{"command": "echo SHOULD_NOT_RUN > marker.txt"}"#,
+        );
+        let (observation, result) = execute_tool_call(&caps, wd, &call, 10);
+        assert_eq!(observation, "run");
+        assert!(tools::is_error_result(&result), "{result}");
+        assert!(result.contains("bash capability denied"));
+        // The command did NOT run: no side-effect file was created.
+        assert!(!wd.join("marker.txt").exists());
+    }
+
+    #[test]
+    fn dispatch_denies_oversize_create() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        // Tiny per-file cap so a small payload trips the size guard.
+        let mut caps = Capabilities::agent_default(wd);
+        caps.max_file_bytes = 8;
+
+        let call = tool_call(
+            "file_editor",
+            r#"{"command": "create", "path": "big.txt", "file_text": "0123456789"}"#,
+        );
+        let (observation, result) = execute_tool_call(&caps, wd, &call, 10);
+        assert_eq!(observation, "edit");
+        assert!(tools::is_error_result(&result), "{result}");
+        assert!(result.contains("exceeds"));
+        // The write did NOT happen.
+        assert!(!wd.join("big.txt").exists());
+    }
+
+    #[test]
+    fn dispatch_allows_ops_under_agent_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let caps = Capabilities::agent_default(wd);
+
+        let (_, w) = execute_tool_call(
+            &caps,
+            wd,
+            &tool_call(
+                "file_editor",
+                r#"{"command": "create", "path": "ok.txt", "file_text": "hi"}"#,
+            ),
+            10,
+        );
+        assert!(!tools::is_error_result(&w), "{w}");
+        assert!(wd.join("ok.txt").exists());
+
+        let (_, b) = execute_tool_call(
+            &caps,
+            wd,
+            &tool_call("terminal", r#"{"command": "echo hi"}"#),
+            10,
+        );
+        assert!(!tools::is_error_result(&b), "{b}");
+        assert!(b.contains("hi"));
     }
 }

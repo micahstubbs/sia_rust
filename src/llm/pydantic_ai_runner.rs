@@ -36,6 +36,7 @@ use serde_json::{json, Value};
 
 use crate::config::Config;
 use crate::error::{SiaError, SiaResult};
+use crate::sandbox::{Capabilities, CapabilityError};
 
 use super::openai_api::{
     ChatMessage, ChatRequest, ChatResponse, ChatTool, ChatTransport, ToolCall,
@@ -142,25 +143,54 @@ pub fn bash(working_dir: &Path, command: &str, timeout_secs: u64) -> String {
     }
 }
 
+/// Render a capability denial as an `Error:`-prefixed tool-result string so it
+/// flows back to the model exactly like any other tool error (issue #89).
+fn deny(err: CapabilityError) -> String {
+    format!("{} {err}", tools::ERROR_PREFIX)
+}
+
 /// Execute one tool call against the PydanticAI tools, returning the result text.
-fn execute_tool_call(working_dir: &Path, call: &ToolCall, shell_timeout: u64) -> String {
+///
+/// Every model-invoked tool call is first checked against the agent's
+/// [`Capabilities`] allow-list (issue #89): the relevant `check_*` runs *before*
+/// the per-tool helper, and a denial is returned as an `Error:`-prefixed string
+/// without touching the filesystem or spawning a process. The helpers
+/// themselves (and their parity tests) are unchanged.
+fn execute_tool_call(
+    caps: &Capabilities,
+    working_dir: &Path,
+    call: &ToolCall,
+    shell_timeout: u64,
+) -> String {
     let args: Value = serde_json::from_str(&call.function.arguments).unwrap_or_else(|_| json!({}));
     let s = |key: &str| -> Option<&str> { args.get(key).and_then(|v| v.as_str()) };
 
     match call.function.name.as_str() {
         "write_file" => match (s("path"), s("content")) {
-            (Some(path), Some(content)) => write_file(working_dir, path, content),
+            (Some(path), Some(content)) => match caps
+                .check_write(path)
+                .and_then(|()| caps.check_size(content.len() as u64))
+            {
+                Ok(()) => write_file(working_dir, path, content),
+                Err(e) => deny(e),
+            },
             _ => format!(
                 "{} write_file requires 'path' and 'content'",
                 tools::ERROR_PREFIX
             ),
         },
         "read_file" => match s("path") {
-            Some(path) => read_file(working_dir, path),
+            Some(path) => match caps.check_read(path) {
+                Ok(()) => read_file(working_dir, path),
+                Err(e) => deny(e),
+            },
             None => format!("{} read_file requires a 'path'", tools::ERROR_PREFIX),
         },
         "bash" => match s("command") {
-            Some(cmd) => bash(working_dir, cmd, shell_timeout),
+            Some(cmd) => match caps.check_bash(cmd) {
+                Ok(()) => bash(working_dir, cmd, shell_timeout),
+                Err(e) => deny(e),
+            },
             None => format!("{} bash requires a 'command'", tools::ERROR_PREFIX),
         },
         other => format!("{} unknown tool '{other}'", tools::ERROR_PREFIX),
@@ -259,7 +289,9 @@ pub fn run_pydantic_ai_agent(
         // Append the assistant message (with its tool calls) to the conversation.
         messages.push(assistant.clone());
 
-        // Execute each tool call, record it, and feed the result back.
+        // Execute each tool call, record it, and feed the result back. Every
+        // call is gated by the agent's capability allow-list (issue #89).
+        let caps = Capabilities::agent_default(wd);
         for call in &assistant.tool_calls {
             let input: Value =
                 serde_json::from_str(&call.function.arguments).unwrap_or_else(|_| json!({}));
@@ -269,7 +301,7 @@ pub fn run_pydantic_ai_agent(
                 input,
             });
 
-            let result = execute_tool_call(wd, call, config.shell_timeout);
+            let result = execute_tool_call(&caps, wd, call, config.shell_timeout);
             let is_error = tools::is_error_result(&result);
             mw.record(TrajectoryEvent::ToolResult {
                 tool_use_id: call.id.clone(),
@@ -593,5 +625,82 @@ mod tests {
         )
         .expect("live run should succeed");
         assert!(!outcome.trajectory.messages().is_empty());
+    }
+
+    // --- Capability allow-list enforcement (issue #89) ---
+
+    fn tool_call(name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: "call_0".to_string(),
+            kind: "function".to_string(),
+            function: FunctionCall {
+                name: name.to_string(),
+                arguments: arguments.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn dispatch_denies_bash_when_capability_disallows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let mut caps = Capabilities::agent_default(wd);
+        caps.allow_bash = false;
+
+        let result = execute_tool_call(
+            &caps,
+            wd,
+            &tool_call("bash", r#"{"command": "echo SHOULD_NOT_RUN > marker.txt"}"#),
+            10,
+        );
+        assert!(tools::is_error_result(&result), "{result}");
+        assert!(result.contains("bash capability denied"));
+        assert!(!wd.join("marker.txt").exists());
+    }
+
+    #[test]
+    fn dispatch_denies_oversize_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let mut caps = Capabilities::agent_default(wd);
+        caps.max_file_bytes = 4;
+
+        let result = execute_tool_call(
+            &caps,
+            wd,
+            &tool_call(
+                "write_file",
+                r#"{"path": "big.txt", "content": "0123456789"}"#,
+            ),
+            10,
+        );
+        assert!(tools::is_error_result(&result), "{result}");
+        assert!(result.contains("exceeds"));
+        assert!(!wd.join("big.txt").exists());
+    }
+
+    #[test]
+    fn dispatch_allows_ops_under_agent_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let caps = Capabilities::agent_default(wd);
+
+        let w = execute_tool_call(
+            &caps,
+            wd,
+            &tool_call("write_file", r#"{"path": "ok.txt", "content": "hi"}"#),
+            10,
+        );
+        assert!(!tools::is_error_result(&w), "{w}");
+        assert!(wd.join("ok.txt").exists());
+
+        let b = execute_tool_call(
+            &caps,
+            wd,
+            &tool_call("bash", r#"{"command": "echo hi"}"#),
+            10,
+        );
+        assert!(!tools::is_error_result(&b), "{b}");
+        assert!(b.contains("hi"));
     }
 }

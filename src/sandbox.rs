@@ -60,6 +60,12 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
+/// Default per-file byte cap for the [`Capabilities::agent_default`] profile
+/// (10 MiB). This is a `const` rather than a `Config` field to keep the
+/// capability layer dependency-free and the config/parity surface unchanged; a
+/// stricter profile can lower it by setting `max_file_bytes` directly.
+pub const AGENT_DEFAULT_MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
 /// A declarative allow-list of what a native tool executor may do.
 ///
 /// Construct via [`Capabilities::default`] (deny-by-default within `fs_root`),
@@ -118,6 +124,37 @@ impl Capabilities {
             allow_network: false,
             fs_root: root.into(),
             ..Capabilities::default()
+        }
+    }
+
+    /// The policy a SIA agent runs under **by default**, and the single
+    /// enforcement point the native runners consult before every model-invoked
+    /// tool call (issue #89).
+    ///
+    /// A SIA agent legitimately needs to read, write, and run shell commands in
+    /// its workspace, so this profile grants `allow_read`/`allow_write`/
+    /// `allow_bash`. It denies network (`allow_network = false`; this layer never
+    /// grants it), confines all paths to `root` (`fs_root`), caps any single file
+    /// at [`AGENT_DEFAULT_MAX_FILE_BYTES`] (10 MiB), and applies no bash
+    /// allow-list (`allowed_bash_prefixes = None`, i.e. any command is permitted
+    /// once `allow_bash` is satisfied).
+    ///
+    /// A **stricter profile** is a drop-in tightening of the returned value: set
+    /// `allow_bash = false` to forbid shell entirely, set
+    /// `allowed_bash_prefixes = Some(..)` to whitelist commands, or lower
+    /// `max_file_bytes`. Because the runners enforce *this* profile at their
+    /// tool-dispatch chokepoint, it is the one place the landlock/seccomp/WASI
+    /// OS-level roadmap (see the module docs) builds on: tightening here
+    /// tightens every native tool call.
+    pub fn agent_default(root: impl Into<PathBuf>) -> Self {
+        Capabilities {
+            allow_read: true,
+            allow_write: true,
+            allow_bash: true,
+            allow_network: false,
+            fs_root: root.into(),
+            max_file_bytes: AGENT_DEFAULT_MAX_FILE_BYTES,
+            allowed_bash_prefixes: None,
         }
     }
 
@@ -436,6 +473,43 @@ mod tests {
         assert!(caps.check_read("a.txt").is_ok());
         assert!(caps.check_write("a.txt").is_err());
         assert!(caps.check_bash("ls").is_err());
+    }
+
+    #[test]
+    fn agent_default_allows_workspace_ops_and_enforces_limits() {
+        let caps = Capabilities::agent_default(root());
+        // The agent profile grants read/write/bash within the workspace.
+        assert!(caps.allow_read);
+        assert!(caps.allow_write);
+        assert!(caps.allow_bash);
+        // Network is never granted by this layer.
+        assert!(!caps.allow_network);
+        assert_eq!(caps.fs_root, root());
+        assert_eq!(caps.max_file_bytes, AGENT_DEFAULT_MAX_FILE_BYTES);
+        assert!(caps.allowed_bash_prefixes.is_none());
+
+        // Allowed: read/write/bash within root.
+        assert!(caps.check_read("src/main.rs").is_ok());
+        assert!(caps.check_write("out/result.txt").is_ok());
+        assert!(caps.check_bash("cargo test").is_ok());
+
+        // Denied: an oversize write (one byte over the cap).
+        let err = caps
+            .check_size(AGENT_DEFAULT_MAX_FILE_BYTES + 1)
+            .unwrap_err();
+        assert!(matches!(err, CapabilityError::SizeExceeded { .. }));
+        // At the cap exactly is fine.
+        assert!(caps.check_size(AGENT_DEFAULT_MAX_FILE_BYTES).is_ok());
+
+        // Denied: a `..`-escaping path on both read and write.
+        assert!(matches!(
+            caps.check_read("../etc/passwd").unwrap_err(),
+            CapabilityError::Escape { .. }
+        ));
+        assert!(matches!(
+            caps.check_write("a/../../escape").unwrap_err(),
+            CapabilityError::Escape { .. }
+        ));
     }
 
     #[test]

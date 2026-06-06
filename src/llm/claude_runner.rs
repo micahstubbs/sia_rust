@@ -27,6 +27,7 @@ use serde_json::json;
 
 use crate::config::Config;
 use crate::error::{SiaError, SiaResult};
+use crate::sandbox::{Capabilities, CapabilityError};
 
 use super::anthropic_api::{
     ApiMessage, ContentBlock, MessagesRequest, MessagesResponse, MessagesTransport,
@@ -38,9 +39,22 @@ use super::{telemetry, tools, AgentRunOutcome};
 /// bounds the size of any single generation.
 const MAX_TOKENS_PER_RESPONSE: u64 = 8192;
 
+/// Render a capability denial as an `Error:`-prefixed tool-result string so it
+/// flows back to the model exactly like any other tool error (issue #89).
+fn deny(err: CapabilityError) -> String {
+    format!("{} {err}", tools::ERROR_PREFIX)
+}
+
 /// Dispatch a single `tool_use` block to the matching sandboxed executor,
 /// returning the result text.
+///
+/// Every model-invoked tool call is first checked against the agent's
+/// [`Capabilities`] allow-list (issue #89): the relevant `check_*` runs *before*
+/// the [`tools`] executor, and a denial is returned as an `Error:`-prefixed
+/// string without touching the filesystem or spawning a process. The lexical
+/// sandbox inside [`tools`] remains as a defense-in-depth second layer.
 fn execute_tool(
+    caps: &Capabilities,
     working_dir: &Path,
     name: &str,
     input: &serde_json::Value,
@@ -49,27 +63,50 @@ fn execute_tool(
     let s = |key: &str| -> Option<&str> { input.get(key).and_then(|v| v.as_str()) };
     match name {
         "Bash" => match s("command") {
-            Some(cmd) => tools::bash(working_dir, cmd, shell_timeout),
+            Some(cmd) => match caps.check_bash(cmd) {
+                Ok(()) => tools::bash(working_dir, cmd, shell_timeout),
+                Err(e) => deny(e),
+            },
             None => format!("{} Bash requires a 'command' string", tools::ERROR_PREFIX),
         },
         "Read" => match s("path") {
-            Some(path) => tools::read_file(working_dir, path),
+            Some(path) => match caps.check_read(path) {
+                Ok(()) => tools::read_file(working_dir, path),
+                Err(e) => deny(e),
+            },
             None => format!("{} Read requires a 'path' string", tools::ERROR_PREFIX),
         },
         "Write" => match (s("path"), s("content")) {
-            (Some(path), Some(content)) => tools::write_file(working_dir, path, content),
+            (Some(path), Some(content)) => match caps
+                .check_write(path)
+                .and_then(|()| caps.check_size(content.len() as u64))
+            {
+                Ok(()) => tools::write_file(working_dir, path, content),
+                Err(e) => deny(e),
+            },
             _ => format!(
                 "{} Write requires 'path' and 'content' strings",
                 tools::ERROR_PREFIX
             ),
         },
         "Edit" => match (s("path"), s("old_string"), s("new_string")) {
-            (Some(path), Some(old), Some(new)) => tools::edit_file(working_dir, path, old, new),
+            (Some(path), Some(old), Some(new)) => match caps
+                .check_write(path)
+                .and_then(|()| caps.check_size(new.len() as u64))
+            {
+                Ok(()) => tools::edit_file(working_dir, path, old, new),
+                Err(e) => deny(e),
+            },
             _ => format!(
                 "{} Edit requires 'path', 'old_string', and 'new_string' strings",
                 tools::ERROR_PREFIX
             ),
         },
+        // Glob is intentionally not capability-gated: a glob pattern is not a
+        // path (it contains wildcards and may legitimately span subdirectories),
+        // so `check_within_root` would be awkward and false-positive-prone. Reads
+        // it discovers still flow through `Read`, which *is* gated. The lexical
+        // sandbox in `tools::glob` keeps results rooted at `working_dir`.
         "Glob" => match s("pattern") {
             Some(pattern) => tools::glob(working_dir, pattern),
             None => format!("{} Glob requires a 'pattern' string", tools::ERROR_PREFIX),
@@ -171,10 +208,12 @@ pub fn run_claude_agent(
             });
         }
 
-        // Execute each tool call and build the user tool_result message.
+        // Execute each tool call and build the user tool_result message. Every
+        // call is gated by the agent's capability allow-list (issue #89).
+        let caps = Capabilities::agent_default(wd);
         let mut result_blocks: Vec<ContentBlock> = Vec::new();
         for (id, name, input) in &tool_uses {
-            let result = execute_tool(wd, name, input, config.shell_timeout);
+            let result = execute_tool(&caps, wd, name, input, config.shell_timeout);
             let is_error = tools::is_error_result(&result);
             mw.record(TrajectoryEvent::ToolResult {
                 tool_use_id: id.clone(),
@@ -557,5 +596,68 @@ mod tests {
             .map(|t: &ToolDef| t.name.as_str())
             .collect();
         assert_eq!(names, ["Bash", "Read", "Write", "Edit", "Glob"]);
+    }
+
+    // --- Capability allow-list enforcement (issue #89) ---
+
+    #[test]
+    fn execute_tool_denies_bash_when_capability_disallows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let mut caps = Capabilities::agent_default(wd);
+        caps.allow_bash = false;
+
+        let result = execute_tool(
+            &caps,
+            wd,
+            "Bash",
+            &json!({"command": "echo SHOULD_NOT_RUN > marker.txt"}),
+            10,
+        );
+        assert!(tools::is_error_result(&result), "{result}");
+        assert!(result.contains("bash capability denied"));
+        // The command did NOT run: no side-effect file was created.
+        assert!(!wd.join("marker.txt").exists());
+    }
+
+    #[test]
+    fn execute_tool_denies_oversize_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let mut caps = Capabilities::agent_default(wd);
+        caps.max_file_bytes = 4;
+
+        let result = execute_tool(
+            &caps,
+            wd,
+            "Write",
+            &json!({"path": "big.txt", "content": "0123456789"}),
+            10,
+        );
+        assert!(tools::is_error_result(&result), "{result}");
+        assert!(result.contains("exceeds"));
+        // The write did NOT happen.
+        assert!(!wd.join("big.txt").exists());
+    }
+
+    #[test]
+    fn execute_tool_allows_ops_under_agent_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let caps = Capabilities::agent_default(wd);
+
+        let w = execute_tool(
+            &caps,
+            wd,
+            "Write",
+            &json!({"path": "ok.txt", "content": "hi"}),
+            10,
+        );
+        assert!(!tools::is_error_result(&w), "{w}");
+        assert!(wd.join("ok.txt").exists());
+
+        let b = execute_tool(&caps, wd, "Bash", &json!({"command": "echo hi"}), 10);
+        assert!(!tools::is_error_result(&b), "{b}");
+        assert!(b.contains("hi"));
     }
 }
