@@ -1,0 +1,7 @@
+{
+  "profile_id": "gemini-target",
+  "name": "Gemini 2.5 Flash (Google)",
+  "model": "gemini-2.5-flash",
+  "provider_id": "gemini",
+  "agent_reference": "default"
+}

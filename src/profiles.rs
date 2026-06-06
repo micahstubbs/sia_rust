@@ -204,6 +204,15 @@ mod tests {
     }
 
     #[test]
+    fn test_gemini_target_profile_resolves_provider() {
+        let p = load_target_agent_profile("gemini-target").unwrap();
+        assert_eq!(p.agent_reference.kind, "default");
+        assert_eq!(p.model, "gemini-2.5-flash");
+        assert_eq!(p.provider.provider_id, "gemini");
+        assert_eq!(p.provider.client_kind, "google");
+    }
+
+    #[test]
     fn test_unknown_profile_raises() {
         assert!(load_meta_agent_profile("nope").is_err());
     }
