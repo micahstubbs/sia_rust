@@ -8,14 +8,17 @@ reproduced **byte-for-byte**.
 ## Build & test
 
 ```bash
-cargo build            # builds the `sia` library + binary
-cargo test             # runs the full suite (unit + integration + golden)
-cargo run -- web       # serve the runs visualizer (./runs by default)
-cargo run -- --help    # CLI help (run / web sub-commands)
+cargo build                  # lean default build (no LLM client deps)
+cargo build --features llm   # include the native rig-core LLM runners
+cargo test                   # runs the full suite (unit + integration + golden)
+cargo test --features llm    # also runs the LLM-runner / middleware tests (offline)
+cargo run -- web             # serve the runs visualizer (./runs by default)
+cargo run -- --help          # CLI help (run / web sub-commands)
 ```
 
 CI (`.github/workflows/rust.yml`) runs `cargo fmt --check`, `cargo clippy
--D warnings`, and `cargo test`.
+-D warnings`, and `cargo test` for **both** the default build and `--features llm`,
+plus the differential-parity gate and the standalone `evals/` crate.
 
 ## Module map (Python → Rust)
 
@@ -38,29 +41,62 @@ CI (`.github/workflows/rust.yml`) runs `cargo fmt --check`, `cargo clippy
 | `cli.py` | `cli.rs` |
 | `web/runs.py` | `web/runs.rs` |
 | `web/server.py` | `web/server.rs` |
+| *(native, no Python source)* | `llm/*` — see below |
+
+### Native LLM client (`src/llm/`, feature `llm`)
+
+The meta/feedback runners' actual LLM calls — left as the integration boundary in
+the initial port — are now implemented natively on
+[`rig-core`](https://crates.io/crates/rig-core), behind the optional `llm` cargo
+feature so the default build/published crate stay lean.
+
+| Module | Role |
+|---|---|
+| `llm/mod.rs` | `AgentRunner` trait, `TrajectoryContext`/`AgentRunOutcome`, re-exports |
+| `llm/trajectory.rs` | `AgentTrajectory` — serializes to the `agent_execution.json` shape |
+| `llm/trajectory_middleware.rs` | `TrajectoryMiddleware` — structured event/usage/timing capture |
+| `llm/rig_runner.rs` | `RigAgentRunner` — single-turn prompt via rig's Anthropic client |
+| `llm/anthropic_api.rs` | Anthropic Messages API types + injectable `MessagesTransport` |
+| `llm/openai_api.rs` | OpenAI-compatible chat-completions types + `ChatTransport` |
+| `llm/tools.rs` | Sandboxed `Bash`/`Read`/`Write`/`Edit`/`Glob` executors (shared) |
+| `llm/claude_runner.rs` | Native **claude** runner — `/v1/messages` tool-use loop |
+| `llm/openhands_runner.rs` | Native **openhands** runner — chat-completions loop + `openhands_trajectory/` events |
+| `llm/pydantic_ai_runner.rs` | Native **pydantic-ai** runner — write/read/bash + request limit |
+| `llm/provider_mapping.rs` | `Provider` → constructed transport (api-key/base-url resolution) |
+| `llm/retry.rs` | `RetryPolicy` + backoff + transport decorators with optional fallback |
+| `llm/structured.rs` | Structured-output extraction/parity harness + rig `Extractor` wrapper |
+
+Every loop is driven through an **injectable transport**, so the full tool-use
+loops are tested offline with scripted/mocked responses (real provider calls are
+`#[ignore]`d, gated on the relevant API key).
 
 Library mapping: pydantic/json → `serde` + `serde_json` (`preserve_order`);
 argparse → `clap`; FastAPI/uvicorn → `axum`/`tokio`; `subprocess` → `std::process`;
 `importlib.resources` package-data → `include_dir` (bundled provider/profile JSON
 and the web `index.html` are embedded at build time).
 
-## Integration boundary
+## Meta/feedback runners — native vs. the old boundary
 
-The meta/feedback agent runners (`claude` / `openhands` / `pydantic-ai`) wrap
-external LLM SDKs that have no Rust equivalent. The registry, dispatch, and
-model-spec resolution (`resolve_model`) are ported and tested; the actual LLM
-call is the documented boundary and surfaces a clear error in this port (native
-runners are tracked in #38–#41). The **target agent** runs as a real Python
-subprocess (`std::process`).
+The meta/feedback agent runners (`claude` / `openhands` / `pydantic-ai`) originally
+wrapped external LLM SDKs with no Rust equivalent, so the actual LLM call was a
+documented *integration boundary* that returned an error. That boundary is now
+**closed natively** (epic #38): with `--features llm`, each runner drives a real
+agentic tool-use loop on `rig-core`/HTTP transports (see `src/llm/` above), captures
+a faithful trajectory, and writes the visualizer-compatible artifacts. The registry,
+dispatch, and `resolve_model` logic remain shared and identical across builds.
+
+Without the `llm` feature, the runners return a clear *"build with `--features
+llm`"* message — keeping the default build dependency-light — while everything else
+(orchestration, web UI, parity) still works. The **target agent** always runs as a
+real Python subprocess (`std::process`) via the `evaluate.py` contract.
 
 What is functional today: `sia web` (the visualizer) end-to-end; the deterministic
-orchestration scaffolding (`sia run` up to the meta-agent call — task resolution,
-profile/provider loading, run-directory + venv setup, prompt building, target-agent
-subprocess execution, evaluation, context tracking, feedback context); and the CLI
-parsing/dispatch. What is **not yet end-to-end**: a full `sia run` self-improvement
-loop, because the meta/feedback agents need a native LLM runner (#38–#41) — it stops
-with a clear error at the first LLM call. The Python `sia/tasks/` reference agents +
-evaluators are task *data* (read/executed by the agents) and remain unchanged.
+orchestration scaffolding (task resolution, profile/provider loading, run-directory
++ venv setup, prompt building, target-agent subprocess execution, evaluation,
+context tracking, feedback context); the CLI parsing/dispatch; and — with
+`--features llm` — the native meta/feedback agent loops. The Python `sia/tasks/`
+reference agents + evaluators are task *data* (read/executed by the agents) and
+remain unchanged.
 
 ## Parity, benchmarks & evals
 
