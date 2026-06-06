@@ -87,6 +87,9 @@ fn test_user_dir_overrides_bundled() {
     )
     .unwrap();
     std::env::set_var("SIA_PROVIDERS_DIR", &providers_dir);
-    assert_eq!(load_provider("nebius").unwrap().base_url.as_deref(), Some("https://override/v1"));
+    assert_eq!(
+        load_provider("nebius").unwrap().base_url.as_deref(),
+        Some("https://override/v1")
+    );
     clear_vars();
 }
