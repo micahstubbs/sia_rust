@@ -53,6 +53,7 @@ pub mod pydantic_ai_runner;
 pub mod retry;
 mod rig_runner;
 pub mod structured;
+pub mod tavily;
 pub mod telemetry;
 pub mod tools;
 mod trajectory;
@@ -79,6 +80,10 @@ pub use retry::{
 pub use rig_runner::RigAgentRunner;
 pub use structured::{
     extract_answer, extract_json_value, extract_struct, Answer, RigStructuredExtractor,
+};
+pub use tavily::{
+    HttpSearchTransport, MockSearchTransport, SearchRequest, SearchResponse, SearchResult,
+    SearchTransport, TavilyClient,
 };
 pub use telemetry::{write_run_telemetry, GenerationTelemetry, TelemetryLog, TELEMETRY_JSON};
 pub use trajectory::AgentTrajectory;

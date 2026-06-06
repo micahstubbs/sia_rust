@@ -38,6 +38,25 @@ The native runners read the key from that environment variable.
 A custom provider can declare any `api_key_env` name it likes; set that
 variable the same way you would the bundled ones.
 
+### Web search (optional)
+
+| Capability | Env var | Notes |
+|---|---|---|
+| Tavily web search | `TAVILY_API_KEY` | Agent-ready web search for the Feedback Agent / legal benchmark task (issue #106). |
+
+[Tavily](https://docs.tavily.com/) returns clean, LLM-native search results. The
+**free tier** grants 1,000 credits/month (no credit card to sign up): create a
+key at <https://app.tavily.com>, then:
+
+```bash
+export TAVILY_API_KEY="tvly-your-tavily-api-key-here"
+```
+
+This key is only needed at run time and only when web search is used. The Rust
+client lives behind the `llm` feature (`sia::llm::tavily`); it is currently a
+*primitive* (serde types + `TavilyClient`) and is not yet wired into the agent
+tool loop — that wiring is a follow-up.
+
 ---
 
 ## 2. Two ways to supply the keys
