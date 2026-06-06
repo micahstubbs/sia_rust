@@ -30,6 +30,11 @@ mime_guess = "2"
 tempfile = "3"
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+criterion = "0.5"
+
+[[bench]]
+name = "core"
+harness = false
 
 [profile.dev]
 opt-level = 0
