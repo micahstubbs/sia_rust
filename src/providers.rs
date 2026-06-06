@@ -75,7 +75,14 @@ mod tests {
     #[test]
     fn test_bundled_providers_present() {
         let names: std::collections::HashSet<String> = available_providers().into_iter().collect();
-        for expected in ["anthropic", "gemini", "openai", "together", "nebius"] {
+        for expected in [
+            "anthropic",
+            "gemini",
+            "openai",
+            "together",
+            "nebius",
+            "tinker",
+        ] {
             assert!(names.contains(expected), "missing provider {expected}");
         }
     }
@@ -98,6 +105,18 @@ mod tests {
             Some("https://api.tokenfactory.us-central1.nebius.com/v1/")
         );
         assert_eq!(p.api_key_env, "NEBIUS_API_KEY");
+    }
+
+    #[test]
+    fn test_load_tinker_provider() {
+        let p = load_provider("tinker").unwrap();
+        assert_eq!(p.provider_id, "tinker");
+        assert_eq!(p.client_kind, "openai");
+        assert_eq!(
+            p.base_url.as_deref(),
+            Some("https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1")
+        );
+        assert_eq!(p.api_key_env, "TINKER_API_KEY");
     }
 
     #[test]

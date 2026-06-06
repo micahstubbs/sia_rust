@@ -21,6 +21,7 @@ The native runners read the key from that environment variable.
 | `anthropic` | `ANTHROPIC_API_KEY` | anthropic | Default meta/feedback agent + the `claude` runner. |
 | `openai` | `OPENAI_API_KEY` | openai | Also the **fallback** when no provider is supplied to the `openhands` / `pydantic-ai` runners. |
 | `nebius` | `NEBIUS_API_KEY` | openai | Nebius Token Factory (OpenAI-compatible). See [NEBIUS_QUICKSTART.md](NEBIUS_QUICKSTART.md). |
+| `tinker` | `TINKER_API_KEY` | openai | Tinker OpenAI-compatible API. |
 | `together` | `TOGETHER_API_KEY` | openai | Together AI (OpenAI-compatible). |
 | `gemini` | `GEMINI_API_KEY` | google | Google Gemini (OpenAI-compatible endpoint). |
 
@@ -30,7 +31,7 @@ The native runners read the key from that environment variable.
   an explicit provider**, it authenticates via `ANTHROPIC_API_KEY` and honors
   `ANTHROPIC_BASE_URL` as a base-URL override (e.g. a gateway/proxy). If unset,
   it uses the default Anthropic endpoint.
-- For OpenAI-compatible providers (`nebius`, `together`, `openai`, custom), the
+- For OpenAI-compatible providers (`nebius`, `tinker`, `together`, `openai`, custom), the
   base URL comes from the **provider JSON's `base_url`**, not an environment
   variable. To point at a different region/endpoint, create a custom provider
   JSON (see [NEBIUS_QUICKSTART.md](NEBIUS_QUICKSTART.md) §5).

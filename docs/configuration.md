@@ -57,7 +57,7 @@ Configuration is **declarative JSON** you can extend without touching code.
 }
 ```
 
-Bundled providers: `anthropic`, `gemini`, `openai`, `together`, `nebius`.
+Bundled providers: `anthropic`, `gemini`, `openai`, `together`, `nebius`, `tinker`.
 
 ### Profiles — one per agent role
 
@@ -97,8 +97,11 @@ Bundled profiles:
 |---------|------|------------------------|-------|----------|
 | `default-meta` | meta | `agent_impl: claude` | `haiku` | `anthropic` |
 | `default-target` | target | `agent_reference: default` | `claude-haiku-4-5-20251001` | `anthropic` |
+| `gemini-meta` | meta | `agent_impl: openhands` | `gemini/gemini-3.1-pro-preview` | `gemini` |
 | `kimi-nebius-meta` | meta | `agent_impl: openhands` | `moonshotai/Kimi-K2.6` | `nebius` |
 | `kimi-nebius-target` | target | `agent_reference: default` | `moonshotai/Kimi-K2.6` | `nebius` |
+| `gptoss-tinker-target` | target | `agent_reference: default` | `openai/gpt-oss-120b` | `tinker` |
+| `qwen3-tinker-target` | target | `agent_reference: default` | `Qwen/Qwen3-4B-Instruct-2507` | `tinker` |
 
 ### agent_reference — the target agent's seed code + deps
 
@@ -183,6 +186,7 @@ export GEMINI_API_KEY="..."      # gemini provider  (or GOOGLE_API_KEY via openh
 export OPENAI_API_KEY="..."      # openai provider
 export TOGETHER_API_KEY="..."    # together provider
 export NEBIUS_API_KEY="..."      # nebius provider
+export TINKER_API_KEY="..."      # tinker provider
 ```
 
 ## Comparing multiple LLMs on the same task

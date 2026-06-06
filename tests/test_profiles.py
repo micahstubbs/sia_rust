@@ -14,7 +14,13 @@ from sia.profiles import (
 
 
 def test_bundled_profiles_present():
-    assert set(available_profiles()) >= {"default-meta", "default-target", "kimi-nebius-target"}
+    assert set(available_profiles()) >= {
+        "default-meta",
+        "default-target",
+        "kimi-nebius-target",
+        "gptoss-tinker-target",
+        "qwen3-tinker-target",
+    }
 
 
 def test_default_meta_profile():
@@ -41,6 +47,22 @@ def test_kimi_nebius_target_profile_resolves_provider():
     assert p.provider.provider_id == "nebius"
     assert p.provider.base_url is not None
     assert p.provider.base_url.endswith("nebius.com/v1/")
+
+
+def test_gptoss_tinker_target_profile_resolves_provider():
+    p = load_target_agent_profile("gptoss-tinker-target")
+    assert p.agent_reference.kind == "default"
+    assert p.model == "openai/gpt-oss-120b"
+    assert p.provider.provider_id == "tinker"
+    assert p.provider.client_kind == "openai"
+
+
+def test_qwen3_tinker_target_profile_resolves_provider():
+    p = load_target_agent_profile("qwen3-tinker-target")
+    assert p.agent_reference.kind == "default"
+    assert p.model == "Qwen/Qwen3-4B-Instruct-2507"
+    assert p.provider.provider_id == "tinker"
+    assert p.provider.api_key_env == "TINKER_API_KEY"
 
 
 def test_unknown_profile_raises():

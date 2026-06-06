@@ -152,7 +152,13 @@ mod tests {
     #[test]
     fn test_bundled_profiles_present() {
         let names: std::collections::HashSet<String> = available_profiles().into_iter().collect();
-        for expected in ["default-meta", "default-target", "kimi-nebius-target"] {
+        for expected in [
+            "default-meta",
+            "default-target",
+            "kimi-nebius-target",
+            "gptoss-tinker-target",
+            "qwen3-tinker-target",
+        ] {
             assert!(names.contains(expected), "missing profile {expected}");
         }
     }
@@ -210,6 +216,24 @@ mod tests {
         assert_eq!(p.model, "gemini-2.5-flash");
         assert_eq!(p.provider.provider_id, "gemini");
         assert_eq!(p.provider.client_kind, "google");
+    }
+
+    #[test]
+    fn test_gptoss_tinker_target_profile_resolves_provider() {
+        let p = load_target_agent_profile("gptoss-tinker-target").unwrap();
+        assert_eq!(p.agent_reference.kind, "default");
+        assert_eq!(p.model, "openai/gpt-oss-120b");
+        assert_eq!(p.provider.provider_id, "tinker");
+        assert_eq!(p.provider.client_kind, "openai");
+    }
+
+    #[test]
+    fn test_qwen3_tinker_target_profile_resolves_provider() {
+        let p = load_target_agent_profile("qwen3-tinker-target").unwrap();
+        assert_eq!(p.agent_reference.kind, "default");
+        assert_eq!(p.model, "Qwen/Qwen3-4B-Instruct-2507");
+        assert_eq!(p.provider.provider_id, "tinker");
+        assert_eq!(p.provider.api_key_env, "TINKER_API_KEY");
     }
 
     #[test]
