@@ -52,6 +52,7 @@ pub mod provider_mapping;
 pub mod pydantic_ai_runner;
 pub mod retry;
 mod rig_runner;
+pub mod structured;
 pub mod tools;
 mod trajectory;
 pub mod trajectory_middleware;
@@ -75,6 +76,9 @@ pub use retry::{
     RetryMessagesTransport, RetryPolicy,
 };
 pub use rig_runner::RigAgentRunner;
+pub use structured::{
+    extract_answer, extract_json_value, extract_struct, Answer, RigStructuredExtractor,
+};
 pub use trajectory::AgentTrajectory;
 pub use trajectory_middleware::{
     usage_from_rig, RunMetrics, TokenUsage, TrajectoryEvent, TrajectoryMiddleware,
