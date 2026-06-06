@@ -12,8 +12,12 @@ pub mod error;
 pub mod io_utils;
 pub mod layout;
 pub mod profiles;
+pub mod prompts;
 pub mod providers;
 pub mod results;
+pub mod task_files;
+
+pub use task_files::TaskFiles;
 
 pub use config::Config;
 pub use error::{SiaError, SiaResult};
