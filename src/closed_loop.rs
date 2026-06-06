@@ -72,34 +72,52 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_str(&text).ok()
 }
 
-/// Read a generation's accuracy score in `[0, 1]` from its `results.json`.
+/// Read a generation's accuracy score normalized to `[0, 1]` from its
+/// evaluation results.
 ///
-/// Mirrors the orchestrator/web readers: prefer a fractional `accuracy`
-/// field, else derive it from `accuracy_percent / 100`, else `correct/total`.
-/// Returns `None` when no score can be recovered.
+/// Mirrors the web dashboard's reader (`web::runs::eval_summary`): prefer
+/// `evaluation_results.json`, then `results.json` (so the scheduler's score
+/// series matches the series SIA Studio charts), and within a file prefer
+/// `accuracy_percent` (the authoritative percent), then `accuracy` (a fraction
+/// by convention), then `correct/total`. Because some task evaluators write
+/// `accuracy` on a 0–100 scale, any value `> 1.0` is treated as a percent and
+/// divided by 100 — keeping the series on the `[0, 1]` scale the plateau
+/// detector ([`SchedulerConfig::plateau_eps`]) is calibrated for. Returns
+/// `None` when no score can be recovered.
 fn read_gen_score(gen_dir: &str) -> Option<f64> {
-    let path = Path::new(gen_dir).join(names::RESULTS_JSON);
-    let data = read_json(&path)?;
-    let obj = data.as_object()?;
+    const EVAL_RESULT_NAMES: &[&str] = &["evaluation_results.json", names::RESULTS_JSON];
+    // Treat a value `> 1.0` as a 0–100 percent and rescale to `[0, 1]`.
+    let as_fraction = |v: f64| if v > 1.0 { v / 100.0 } else { v };
+    for name in EVAL_RESULT_NAMES {
+        let path = Path::new(gen_dir).join(name);
+        let Some(data) = read_json(&path) else {
+            continue;
+        };
+        let Some(obj) = data.as_object() else {
+            continue;
+        };
 
-    if let Some(acc) = obj.get("accuracy").and_then(Value::as_f64) {
-        return Some(acc);
-    }
-    if let Some(pct) = obj.get("accuracy_percent").and_then(Value::as_f64) {
-        return Some(pct / 100.0);
-    }
-    let correct = obj.get("correct").and_then(Value::as_f64);
-    let total = {
-        let tq = obj.get("total_questions").and_then(Value::as_f64);
-        match tq {
-            Some(n) if n != 0.0 => Some(n),
-            _ => obj.get("total").and_then(Value::as_f64),
+        if let Some(pct) = obj.get("accuracy_percent").and_then(Value::as_f64) {
+            return Some(as_fraction(pct));
         }
-    };
-    match (correct, total) {
-        (Some(c), Some(t)) if t > 0.0 => Some(c / t),
-        _ => None,
+        if let Some(acc) = obj.get("accuracy").and_then(Value::as_f64) {
+            return Some(as_fraction(acc));
+        }
+        let correct = obj.get("correct").and_then(Value::as_f64);
+        let total = {
+            let tq = obj.get("total_questions").and_then(Value::as_f64);
+            match tq {
+                Some(n) if n != 0.0 => Some(n),
+                _ => obj.get("total").and_then(Value::as_f64),
+            }
+        };
+        if let (Some(c), Some(t)) = (correct, total) {
+            if t > 0.0 {
+                return Some(c / t);
+            }
+        }
     }
+    None
 }
 
 /// Total tokens (input + output) for a generation from its `telemetry.json`,
@@ -165,7 +183,7 @@ fn gen_compute_cost(gen_dir: &str) -> f64 {
 /// ```json
 /// {
 ///   "generation": 2,
-///   "decision": "harness" | "weight" | "both",
+///   "decision": "harness" | "weight",
 ///   "recommended_next": "harness" | "weight",
 ///   "rationale": "…",
 ///   "harness_efficiency": 0.0001 | null,
@@ -174,15 +192,11 @@ fn gen_compute_cost(gen_dir: &str) -> f64 {
 /// }
 /// ```
 ///
-/// # "both"
-///
-/// [`AdaptiveScheduler::decide_next`] returns only `Harness` or `Weight`. We
-/// surface `"both"` for the specific case where the harness is still buying a
-/// *strong* recent gain **and** the series has plateaued by the #19 detector —
-/// i.e. a borderline moment where continuing harness *and* trying weights are
-/// both defensible. In practice `decide_next` already returns `Weight` on
-/// plateau, so `"both"` only appears alongside a measurable strong harness
-/// gain; otherwise the decision is exactly `decide_next`.
+/// `decision` mirrors [`AdaptiveScheduler::decide_next`] (`harness` or
+/// `weight`). A combined `"both"` is intentionally not emitted while the loop
+/// only performs harness updates (so there is no weight-update history to weigh
+/// against harness); [`maybe_run_weight_update`] still accepts `"both"`
+/// defensively for a future mixed-history scheduler.
 ///
 /// # Best-effort
 ///
@@ -203,8 +217,6 @@ pub fn record_scheduler_decision(
     let current_score = read_gen_score(&current_dir)?;
 
     let mut scheduler = AdaptiveScheduler::with_config(config.clone());
-    let mut prev_score: Option<f64> = None;
-    let mut strong_recent_gain = false;
     for g in 0..=current_gen {
         let gen_dir = layout.gen_dir(g);
         let score = match read_gen_score(&gen_dir) {
@@ -218,25 +230,17 @@ pub fn record_scheduler_decision(
             score,
             compute_cost,
         });
-        if let Some(p) = prev_score {
-            // A "strong" gain is comfortably above the plateau epsilon.
-            strong_recent_gain = score - p >= config.plateau_eps * 5.0;
-        }
-        prev_score = Some(score);
     }
 
     let summary = scheduler.efficiency_summary();
-    let recommended = scheduler.decide_next();
     let plateaued = summary
         .get("harness_plateaued")
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    // Decision mapping. decide_next() is Harness|Weight. Surface "both" only at
-    // the borderline: a plateau (so weights are warranted) that nonetheless
-    // came with a strong most-recent harness gain (so harness is also alive).
-    let decision = match recommended {
-        UpdateKind::Weight if strong_recent_gain && plateaued => "both",
+    // `decide_next()` is the source of truth (Harness|Weight). We do not synthesize
+    // a "both" while the loop only records harness updates.
+    let decision = match scheduler.decide_next() {
         UpdateKind::Weight => "weight",
         UpdateKind::Harness => "harness",
     };
@@ -468,6 +472,39 @@ mod tests {
             .to_string(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn read_gen_score_normalizes_percent_and_prefers_evaluation_results() {
+        let d = tempfile::tempdir().unwrap();
+        let gen = d.path().join("gen");
+        std::fs::create_dir_all(&gen).unwrap();
+        let gen_s = gen.to_string_lossy().into_owned();
+
+        // `accuracy` written on a 0–100 scale (e.g. longcot-chess) normalizes to [0,1].
+        std::fs::write(
+            gen.join(names::RESULTS_JSON),
+            json!({"accuracy": 75.0}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(read_gen_score(&gen_s), Some(0.75));
+
+        // A fractional `accuracy` is returned unchanged.
+        std::fs::write(
+            gen.join(names::RESULTS_JSON),
+            json!({"accuracy": 0.4}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(read_gen_score(&gen_s), Some(0.4));
+
+        // `evaluation_results.json` takes precedence over `results.json`,
+        // and `accuracy_percent` takes precedence within a file.
+        std::fs::write(
+            gen.join("evaluation_results.json"),
+            json!({"accuracy_percent": 90.0, "accuracy": 0.1}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(read_gen_score(&gen_s), Some(0.9));
     }
 
     #[test]
