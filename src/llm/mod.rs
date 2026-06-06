@@ -46,6 +46,8 @@
 
 pub mod anthropic_api;
 pub mod claude_runner;
+pub mod openai_api;
+pub mod openhands_runner;
 mod rig_runner;
 pub mod tools;
 mod trajectory;
@@ -56,6 +58,11 @@ pub use anthropic_api::{
     MessagesTransport, ToolDef,
 };
 pub use claude_runner::run_claude_agent;
+pub use openai_api::{
+    ChatMessage, ChatRequest, ChatResponse, ChatTool, ChatTransport, ChatUsage, Choice,
+    FunctionCall, FunctionDef, HttpChatTransport, ToolCall,
+};
+pub use openhands_runner::{run_openhands_agent, OpenHandsEventLog, OpenHandsRunSummary};
 pub use rig_runner::RigAgentRunner;
 pub use trajectory::AgentTrajectory;
 pub use trajectory_middleware::{
