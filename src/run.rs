@@ -35,9 +35,10 @@ pub fn run_web(args: &ArgMatches) -> SiaResult<()> {
 /// functional: task resolution, profile/provider loading, run-directory + venv setup,
 /// the meta prompt, and the per-generation scaffolding (target-agent subprocess
 /// execution, evaluation, context tracking, feedback context). The **meta/feedback
-/// agents** are dispatched through the agent-impl registry, whose native runners are
-/// not yet implemented (tracked in #38–#41) — so a full `sia run` stops with a clear
-/// error at the first LLM call. `sia web` is fully functional today.
+/// agents** are dispatched through the agent-impl registry; with `--features llm` the
+/// native runners drive the meta/feedback agents (issues #39–#41). Without that
+/// feature the default build stops with a clear feature-gate error at the first LLM
+/// call. `sia web` is fully functional today.
 pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()> {
     let max_gen = *args
         .get_one::<i64>("max_gen")

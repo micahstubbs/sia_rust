@@ -32,30 +32,29 @@
 //! exactly the quantity a harness-vs-weight policy wants to compare. See
 //! [`AdaptiveScheduler::improvement_efficiency`].
 //!
-//! # Integration seam (NOT yet wired into the orchestrator)
+//! # Integration seam (wired observationally; decision branching is future work)
 //!
-//! Like #19's [`crate::weights::should_trigger_weight_update`] and #66's verifier
-//! work, this ships as a **standalone, tested module that is not yet wired into
-//! the orchestrator** — only the seam is documented here. The intended hookup:
+//! As of #84, [`crate::orchestrator::run_generation_with`] calls
+//! [`crate::closed_loop::record_scheduler_decision`] after each generation,
+//! recording a per-generation decision artifact under the run directory. The
+//! scheduler is now part of the live orchestration path — the intended hookup is
+//! in place:
 //!
-//! * After each generation, the Feedback-Agent / orchestrator
-//!   ([`crate::orchestrator::run_generation_with`]) constructs a
-//!   [`GenerationRecord`] from that generation's score (see
-//!   [`crate::results`]) and its compute cost (e.g. total tokens or `duration_ms`
-//!   from [`crate::llm::GenerationTelemetry`]) and calls
-//!   [`AdaptiveScheduler::record`].
-//! * Before launching the next generation it calls
-//!   [`AdaptiveScheduler::decide_next`] to choose whether the upcoming generation
-//!   should be a harness edit or a weight update, and threads that choice into the
-//!   improvement prompt / `improvement.md` it writes for the next gen directory
-//!   ([`crate::orchestrator::next_gen_dir`]).
+//! * After each generation, the orchestrator constructs a [`GenerationRecord`]
+//!   from that generation's score (see [`crate::results`]) and its compute cost
+//!   (e.g. total tokens or `duration_ms` from [`crate::llm::GenerationTelemetry`])
+//!   and calls [`AdaptiveScheduler::record`] via `closed_loop`.
 //! * [`AdaptiveScheduler::efficiency_summary`] produces a small JSON blob the SIA
 //!   Studio dashboard (#63) can render so a human can see, per lever, how
 //!   efficiently compute is being converted into score and what the scheduler
 //!   recommends next.
 //!
-//! No orchestrator behavior is changed by this module; the wiring above is left
-//! to a follow-up so the policy can be reviewed and tested in isolation first.
+//! The current wiring is **observational**: the decision artifact is written each
+//! generation, but [`AdaptiveScheduler::decide_next`] does not yet branch the
+//! loop (i.e. harness-vs-weight choice is recorded but not acted on). Closing
+//! that loop — threading the decision into the improvement prompt /
+//! `improvement.md` for the next gen directory ([`crate::orchestrator::next_gen_dir`])
+//! — is tracked as a scheduler-drives-loop follow-up.
 //!
 //! # Heuristic, by design
 //!
@@ -134,8 +133,8 @@ impl Default for SchedulerConfig {
 /// A heuristic scheduler that records per-generation outcomes and recommends the
 /// next [`UpdateKind`] based on improvement-per-compute and a plateau signal.
 ///
-/// See the module docs for the policy, the metric, and the (not-yet-wired)
-/// orchestrator integration seam.
+/// See the module docs for the policy, the metric, and the orchestrator
+/// integration seam (wired observationally as of #84).
 pub struct AdaptiveScheduler {
     history: Vec<GenerationRecord>,
     config: SchedulerConfig,

@@ -52,8 +52,8 @@ pub fn run_agent_claude(args: &RunArgs) -> SiaResult<()> {
 #[cfg(not(feature = "llm"))]
 pub fn run_agent_claude(_args: &RunArgs) -> SiaResult<()> {
     Err(SiaError::new(
-        "the native `claude` agent runner is not yet implemented (tracked in issue #39). \
-         The registry, dispatch, and model resolution are ported; the Anthropic Messages \
-         API tool-loop is pending, so `sia run`'s meta/feedback agents are not yet end-to-end.",
+        "the native `claude` agent runner requires the `llm` cargo feature (issue #39). \
+         The registry, dispatch, and model resolution are ported; build with `--features llm` to \
+         enable the Anthropic Messages API tool-loop.",
     ))
 }
