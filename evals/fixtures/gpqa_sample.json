@@ -1,0 +1,67 @@
+[
+  {
+    "id": 1,
+    "domain": "Physics",
+    "subdomain": "Quantum Mechanics",
+    "question": "Two quantum states with energies E1 and E2 have lifetimes of 10^-9 s and 10^-8 s, respectively. Which energy difference would let the two levels be clearly resolved?",
+    "options": {
+      "A": "10^-4 eV",
+      "B": "10^-9 eV",
+      "C": "10^-11 eV",
+      "D": "10^-8 eV"
+    },
+    "correct_answer_letter": "A"
+  },
+  {
+    "id": 2,
+    "domain": "Chemistry",
+    "subdomain": "General Chemistry",
+    "question": "How many electrons does a neutral carbon atom have?",
+    "options": {
+      "A": "4",
+      "B": "6",
+      "C": "12",
+      "D": "8"
+    },
+    "correct_answer_letter": "B"
+  },
+  {
+    "id": 3,
+    "domain": "Biology",
+    "subdomain": "Molecular Biology",
+    "question": "Which molecule carries the amino acid to the ribosome during translation?",
+    "options": {
+      "A": "mRNA",
+      "B": "rRNA",
+      "C": "tRNA",
+      "D": "DNA polymerase"
+    },
+    "correct_answer_letter": "C"
+  },
+  {
+    "id": 4,
+    "domain": "Physics",
+    "subdomain": "Electromagnetism",
+    "question": "In a parallel universe where isolated magnetic monopoles exist, which of Maxwell's equations would change?",
+    "options": {
+      "A": "Only Gauss's law for electricity",
+      "B": "Only Ampere's law (curl of B)",
+      "C": "Gauss's law for magnetism and Faraday's law (divergence and curl of B)",
+      "D": "None of them change"
+    },
+    "correct_answer_letter": "C"
+  },
+  {
+    "id": 5,
+    "domain": "Chemistry",
+    "subdomain": "Organic Chemistry",
+    "question": "What is the hybridization of the central carbon in carbon dioxide (CO2)?",
+    "options": {
+      "A": "sp3",
+      "B": "sp2",
+      "C": "sp",
+      "D": "sp3d"
+    },
+    "correct_answer_letter": "C"
+  }
+]

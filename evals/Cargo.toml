@@ -1,0 +1,40 @@
+# Self-contained eval-harness crate built on dspy-rs (the DSRs Rust port of DSPy).
+#
+# This is intentionally NOT a workspace member of the repo-root crate: it has its
+# own [package] and no [workspace] inheritance, so it builds in isolation with
+# `cd evals && cargo build`. The repo-root crate stays independently buildable.
+#
+# If/when the root `sia` crate exposes reusable types, add:
+#   sia = { path = ".." }
+# It is omitted here because the root crate has no `src/` lib target yet.
+
+[package]
+name = "sia-evals"
+version = "0.1.0"
+edition = "2021"
+description = "GPQA-style multiple-choice eval harness for SIA, built on dspy-rs (DSRs)."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "sia_evals"
+path = "src/lib.rs"
+
+[dependencies]
+# dspy-rs (crate name `dspy_rs`) is the DSPy rewrite in Rust: https://github.com/krypticmouse/DSRs
+dspy-rs = "=0.7.3"
+
+# rig-core MUST be pinned to the exact version dspy-rs 0.7.3 depends on (0.22.0).
+# dspy-rs's public `Adapter` trait takes `rig::tool::ToolDyn` in its signature, so our
+# `MockAdapter` impl must reference the *same* `rig` types. A different rig-core version
+# compiles as a second, incompatible `rig` crate and the trait impl fails to resolve.
+rig-core = "=0.22.0"
+
+# These are pulled into scope by the `#[Signature]` proc-macro expansion and by our code.
+anyhow = "1"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bon = "3"
+schemars = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
