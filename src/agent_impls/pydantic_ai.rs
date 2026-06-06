@@ -34,30 +34,24 @@ pub fn resolve_model(model_name: &str, _provider: Option<&Provider>) -> String {
 #[cfg(feature = "llm")]
 pub fn run_agent_pydantic_ai(args: &RunArgs) -> SiaResult<()> {
     use crate::config::Config;
-    use crate::llm::{run_pydantic_ai_agent, HttpChatTransport};
+    use crate::llm::{provider_mapping, run_pydantic_ai_agent, HttpChatTransport};
 
     let model = resolve_model(&args.model_name, args.provider.as_ref());
 
-    // Resolve base_url + API key from the provider. The base_url defaults to the
-    // OpenAI public endpoint when the provider declares none (matching Python's
-    // OpenAIProvider, which targets an OpenAI-compatible endpoint).
-    let provider = args.provider.as_ref();
-    let base_url = provider
-        .and_then(|p| p.base_url.clone())
-        .unwrap_or_else(|| crate::llm::openai_api::DEFAULT_BASE_URL.to_string());
-
-    let api_key = match provider {
-        Some(p) => std::env::var(&p.api_key_env).map_err(|_| {
-            SiaError::new(format!(
-                "API key env var '{}' for provider '{}' is not set",
-                p.api_key_env, p.provider_id
-            ))
-        })?,
-        None => std::env::var("OPENAI_API_KEY").map_err(|_| {
-            SiaError::new(
-                "no provider supplied and OPENAI_API_KEY is not set for the pydantic-ai runner",
-            )
-        })?,
+    // Resolve base_url + API key. With a provider, build the chat transport via the
+    // mapping (single source of truth). Without one, the historical fallback applies:
+    // the OpenAI public endpoint + OPENAI_API_KEY, with its own missing-key error
+    // (matching Python's OpenAIProvider, which targets an OpenAI-compatible endpoint).
+    let transport = match args.provider.as_ref() {
+        Some(provider) => provider_mapping::chat_transport_for(provider)?,
+        None => {
+            let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+                SiaError::new(
+                    "no provider supplied and OPENAI_API_KEY is not set for the pydantic-ai runner",
+                )
+            })?;
+            HttpChatTransport::new(crate::llm::openai_api::DEFAULT_BASE_URL, api_key)
+        }
     };
 
     let max_turns: u32 = args.max_turns.trim().parse().map_err(|_| {
@@ -67,7 +61,6 @@ pub fn run_agent_pydantic_ai(args: &RunArgs) -> SiaResult<()> {
         ))
     })?;
 
-    let transport = HttpChatTransport::new(base_url, api_key);
     let config = Config::from_env();
     run_pydantic_ai_agent(
         &transport,

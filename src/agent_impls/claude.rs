@@ -18,11 +18,7 @@ use crate::error::{SiaError, SiaResult};
 #[cfg(feature = "llm")]
 pub fn run_agent_claude(args: &RunArgs) -> SiaResult<()> {
     use crate::config::Config;
-    use crate::llm::{run_claude_agent, HttpMessagesTransport};
-
-    // Auth via ANTHROPIC_API_KEY (provider is intentionally ignored, matching Python).
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| SiaError::new("ANTHROPIC_API_KEY is not set"))?;
+    use crate::llm::{provider_mapping, run_claude_agent};
 
     // `max_turns` arrives as a String on RunArgs; parse to a sensible u32.
     let max_turns: u32 = args.max_turns.trim().parse().map_err(|_| {
@@ -35,11 +31,10 @@ pub fn run_agent_claude(args: &RunArgs) -> SiaResult<()> {
         return Err(SiaError::new("max_turns must be at least 1"));
     }
 
-    // Allow an override base URL (used in integration setups); default to the API.
-    let transport = match std::env::var("ANTHROPIC_BASE_URL") {
-        Ok(base) if !base.trim().is_empty() => HttpMessagesTransport::with_base_url(api_key, base),
-        _ => HttpMessagesTransport::new(api_key),
-    };
+    // Auth via ANTHROPIC_API_KEY, honoring an optional ANTHROPIC_BASE_URL override.
+    // The provider is intentionally ignored (matching Python, which delegates auth
+    // to the Claude Agent SDK), so we pass `None` to keep behavior identical.
+    let transport = provider_mapping::messages_transport_for(None)?;
 
     let config = Config::default();
     run_claude_agent(
