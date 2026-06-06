@@ -3,7 +3,7 @@
 **Project:** `sia_rust`  
 **Repository:** `/home/m/sia_rust`  
 **Survey date:** 2026-06-06  
-**Survey HEAD:** `140a988` (`main`)  
+**Survey HEAD:** `da4191a` (`main`)  
 
 ## Executive Summary
 
@@ -13,10 +13,10 @@ Python execution bridge, native Rust meta/feedback LLM runners behind an optiona
 `llm` feature, parity tests, a file-backed web dashboard, benchmark/eval harnesses,
 and a substantial demo/reproducibility documentation package.
 
-The fork-era work is concentrated in 38 commits on 2026-06-06 after the inferred
+The fork-era work is concentrated in 48 commits on 2026-06-06 after the inferred
 upstream baseline `4b4877f` (`chore: bump minor version as cli contracts have
-changed (#23)`). Across that range, the branch changes 117 files with 32,428
-insertions and 312 deletions. The biggest areas of change are `src/`, `src/llm/`,
+changed (#23)`). Across that range, the branch changes 139 files with 33,895
+insertions and 333 deletions. The biggest areas of change are `src/`, `src/llm/`,
 `tests/`, `docs/`, `benchmarks/`, `evals/`, and the project issue-tracking state
 under `.beads/`.
 
@@ -41,15 +41,18 @@ inferred baseline rather than a remote-confirmed fork point:
 - Upstream baseline used for this report: `4b4877f`
 - Baseline subject: `chore: bump minor version as cli contracts have changed (#23)`
 - Commits through that baseline: 11
-- Fork-era commits after that baseline at survey time: 38
+- Fork-era commits after that baseline at survey time: 48
 
-At survey time, `main` was ahead of `origin/main` by three commits:
+At survey time, `main` was ahead of `origin/main` by one commit:
 
-- `7254583` - `docs: add session summary (ignore-env)`
-- `0c0745b` - `add project`
-- `140a988` - `Mirror 18 open GitHub issues into beads tracker`
+- `da4191a` - `Sync beads tracker after upstream review`
 
-This report commit itself is not included in those counts.
+During PDF generation, `origin/main` advanced by three additional remote commits
+(`18e2f24`, `9442ced`, and `f1890b1`). This report evaluates the local checkout at
+`da4191a` and does not include those later remote commits.
+
+The report/PDF artifact commit generated from this document is not included in
+those counts.
 
 ## Work Completed Since The Fork
 
@@ -148,6 +151,8 @@ The fork added or expanded provider support and documentation:
 
 - Bundled Nebius profiles and model-slug verification tooling.
 - Bundled Gemini target profile and tests.
+- Bundled Tinker provider plus `gptoss-tinker-target` and
+  `qwen3-tinker-target` profiles.
 - `.env` loading at startup, with real environment variables taking precedence.
 - Per-provider credentials documentation in `docs/CREDENTIALS.md`.
 - Nebius quickstart and model verification docs.
@@ -181,6 +186,11 @@ The latest local commits added project operations scaffolding:
 - `scripts/seed_beads_from_gh.sh`.
 - A session summary under `docs/session-summaries/`.
 - Mirroring of 18 open GitHub issues into Beads.
+- Subsequent Beads synchronization after upstream review.
+- Expanded `CLAUDE.md` local agent instructions covering build, test, parity, and
+  architecture guidance.
+- Python packaging metadata guard for the OpenHands optional extra, constraining
+  it to supported Python versions.
 
 At survey time, `br list` showed 18 open issues. `br ready --limit 20` showed 17
 ready issues with no blockers. The P1 ready work is heavily demo/safety oriented:
@@ -194,18 +204,23 @@ ready issues with no blockers. The P1 ready work is heavily demo/safety oriented
 
 Commands run during this survey:
 
-| Command | Result |
-|---|---|
-| `cargo test` | Passed. Default build completed all Rust unit/integration/doc tests. |
-| `cargo test --features llm` | Failed under default parallel execution: 270 passed, 2 failed, 6 ignored. The failures were `llm::provider_mapping` tests racing on process environment variables. |
-| `cargo test --features llm -- --test-threads=1` | Passed. Serialized `llm` suite completed successfully, with live provider tests ignored. |
-| `cargo test --manifest-path evals/Cargo.toml` | Passed. Offline eval crate tests passed. |
-| `cargo fmt --check` | Passed. |
-| `cargo clippy -- -D warnings` | Passed. |
-| `cargo clippy --features llm -- -D warnings` | Passed. |
-| `python3 scripts/parity_check.py` | Passed. Reported `PARITY OK: all surfaces byte-identical`. |
-| `python3 -m pytest` | Not run: `pytest` is not installed in this environment. |
-| `python3 -m unittest tests.test_packaging_metadata` | Passed. This validates the current uncommitted packaging metadata test. |
+- Default Rust suite: passed with `cargo test`; the library crate reported 154
+  passed tests, and the integration/doc tests also passed.
+- Parallel `llm` suite: failed under default parallel execution; the library
+  crate reported 272 passed, 4 failed, and 6 ignored tests before aborting. The
+  failures were `llm::provider_mapping` tests racing on process environment
+  variables.
+- Serialized `llm` suite: passed with `--test-threads=1`; the library crate
+  reported 276 passed and 6 ignored tests, and the `llm` integration/doc tests
+  also passed.
+- Standalone eval crate: passed with 4 offline tests.
+- Formatting and lints: `cargo fmt --check`, default clippy, and `llm` clippy all
+  passed with warnings denied.
+- Differential parity: passed; the script reported `PARITY OK: all surfaces
+  byte-identical`.
+- Python pytest suite: not run because `pytest` is not installed in this
+  environment.
+- Packaging metadata unittest: passed.
 
 The normal parallel `llm` test failure is worth treating as a real test-isolation
 issue even though serialized execution passes. The failing tests mutate global
@@ -215,16 +230,11 @@ would make this robust under default `cargo test --features llm`.
 
 ## Current Worktree State
 
-At survey time, the worktree had unrelated uncommitted changes that are not part
-of this report:
-
-- Modified `.beads/.gitignore`: adds `.write.lock`.
-- Modified `pyproject.toml`: constrains the `openhands` optional dependency to
-  Python `>=3.12,<3.14`.
-- Untracked `tests/test_packaging_metadata.py`: unittest coverage for the
-  `openhands` Python-version marker.
-
-Those files were left untouched for this report commit.
+At survey time, before updating this document and generating the PDF artifacts,
+the worktree was clean. `main` was one commit ahead of `origin/main`, with the
+only ahead commit being `da4191a` (`Sync beads tracker after upstream review`).
+During report/PDF generation, an unstaged `.beads/issues.jsonl` update appeared;
+it is intentionally outside the report artifact commit.
 
 ## Main Remaining Risks
 
