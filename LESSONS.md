@@ -39,3 +39,15 @@ Append-only debugging and process lessons for this project.
 **Solution**: Created the missing beads for GitHub #120-#126, parented them under the umbrella, added GitHub comments with the actual local bead IDs, raised the H1/H2 findings to P1, and verified parity with a `comm` comparison of GitHub numbers and beads `external_ref` numbers.
 
 **Prevention**: Make issue grooming idempotent around `external_ref`. For every open GitHub issue, require exactly one open bead with a matching `external_ref` unless the GitHub issue is intentionally closed or superseded. After syncing, run a parity check before reporting completion.
+
+## 2026-06-06T15:27 - Treat provider resource IDs as distinct from runtime API keys
+
+**Problem**: Nebius account/customer/user/org/cloud identifiers looked plausibly related to authentication, but they did not work as `NEBIUS_API_KEY` values for the Token Factory model catalog.
+
+**Root Cause**: The project needs a generated Token Factory API key used as a bearer token. Resource identifiers such as customer IDs, tenant user IDs, tenant org IDs, and AI Cloud IDs identify account objects but are not bearer credentials.
+
+**Lesson**: When provisioning provider credentials, distinguish account/resource IDs from runtime API keys. Verify the exact credential type against official docs and a minimal live endpoint before marking a secret issue unblocked.
+
+**Solution**: Tested each supplied Nebius identifier as an `Authorization: Bearer` value against the Token Factory `/v1/models` endpoint without logging token values. All candidates returned HTTP 401, so the provisioning issue stayed open and a Resend email requested a generated API key from the Token Factory API keys section.
+
+**Prevention**: For future provider-secret audits, record both the expected env var and the credential issuance path. If users provide IDs instead of a key, test them with a short, secret-free request and keep the issue open until the provider accepts the credential.
