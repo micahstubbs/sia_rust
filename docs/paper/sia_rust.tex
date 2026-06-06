@@ -14,17 +14,70 @@
 \usepackage{listings}
 \usepackage[numbers]{natbib}
 \usepackage{CJKutf8}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta, fit, backgrounds}
+
+% Accent palette (matches the ByteDance arXiv house style).
+\definecolor{accent}{HTML}{2A5AA8}
+\definecolor{pyaccent}{HTML}{B5651D}
+\definecolor{pybg}{HTML}{FBF0E6}
 
 \hypersetup{
   colorlinks=true,
-  linkcolor=blue!55!black,
-  citecolor=blue!55!black,
-  urlcolor=blue!55!black,
+  linkcolor=accent,
+  citecolor=accent,
+  urlcolor=accent,
+  pdftitle={A Native Rust Re-implementation of the SIA Self-Improving-Agent Framework: Architecture, Fidelity, and Extensions},
+  pdfauthor={Micah Stubbs, Will Stark},
 }
 
 % Suppress the arxiv.sty "A Preprint" marker (under-title text and page header).
 \renewcommand{\undertitle}{}
 \renewcommand{\headeright}{}
+
+\makeatletter
+% Colored section headers (ByteDance arXiv style), preserving arxiv.sty spacing.
+\renewcommand{\section}{\@startsection{section}{1}{\z@}%
+  {-2.0ex \@plus -0.5ex \@minus -0.2ex}{1.5ex \@plus 0.3ex \@minus 0.2ex}%
+  {\large\bfseries\raggedright\color{accent}}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{\z@}%
+  {-1.8ex \@plus -0.5ex \@minus -0.2ex}{0.8ex \@plus 0.2ex}%
+  {\normalsize\bfseries\raggedright\color{accent}}}
+\renewcommand{\subsubsection}{\@startsection{subsubsection}{3}{\z@}%
+  {-1.5ex \@plus -0.5ex \@minus -0.2ex}{0.5ex \@plus 0.2ex}%
+  {\normalsize\bfseries\raggedright\color{accent}}}
+\renewcommand{\paragraph}{\@startsection{paragraph}{4}{\z@}%
+  {1.5ex \@plus 0.5ex \@minus 0.2ex}{-1em}{\normalsize\bfseries\color{accent}}}
+
+% Clean title block: accent title, no heavy black bars (ByteDance style).
+\renewcommand{\@toptitlebar}{\vskip 0.10in}
+\renewcommand{\@bottomtitlebar}{\vskip 0.12in}
+\renewcommand{\@maketitle}{%
+  \vbox{%
+    \hsize\textwidth \linewidth\hsize
+    \vskip 0.1in
+    \@toptitlebar
+    \centering
+    {\LARGE\scshape\color{accent} \@title\par}
+    \@bottomtitlebar
+    \vskip 0.05in
+    \def\And{\end{tabular}\hfil\linebreak[0]\hfil\begin{tabular}[t]{c}\bfseries\rule{\z@}{24\p@}\ignorespaces}%
+    \def\AND{\end{tabular}\hfil\linebreak[4]\hfil\begin{tabular}[t]{c}\bfseries\rule{\z@}{24\p@}\ignorespaces}%
+    \begin{tabular}[t]{c}\bfseries\rule{\z@}{24\p@}\@author\end{tabular}%
+    \vskip 0.35in \@minus 0.1in \center{\@date}\vskip 0.18in
+  }%
+}
+
+% Colored, enclosed abstract: accent rule + heading + accent rule.
+\renewenvironment{abstract}{%
+  \par\vskip 0.05in
+  {\color{accent}\hrule height 1pt}\vskip 7pt
+  \centerline{\large\bfseries\color{accent} Abstract}\vskip 6pt
+  \begingroup\leftskip 2.2em \rightskip 2.2em
+}{%
+  \par\endgroup\vskip 6pt {\color{accent}\hrule height 1pt}\vskip 0.12in
+}
+\makeatother
 
 % Inline + block code styling (no external branding)
 \definecolor{codeframe}{HTML}{B0B0B0}
@@ -260,26 +313,56 @@ The architecture layering is summarized in Figure~\ref{fig:arch}.
 
 \begin{figure}[t]
 \centering
-\begin{lstlisting}
-sia (Rust)
-  sia run --> orchestrator --> context_manager --> results
-       |
-       +- Meta / Feedback agents
-       |    +--> native LLM runners  [feature: llm]
-       |         src/llm/* on rig-core:
-       |           * claude       - Anthropic /v1/messages tool loop
-       |           * openhands    - OpenAI-compatible chat-completions
-       |           * pydantic-ai  - write/read/bash + request limit
-       |         + transports, trajectory, retry, structured
-       |
-       +- Target agent --> Python subprocess
-                           (optional Docker sandbox)
-                           via the evaluate.py contract
-
-  sia web --> Axum visualizer of ./runs
-\end{lstlisting}
-\caption{The \texttt{sia\_rust} architecture: native Rust meta/feedback runners with
-a Python bridge only for target execution.}
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={rounded corners=2pt, draw=accent, fill=accent!7, line width=0.7pt,
+              inner sep=5pt, align=center, font=\sffamily},
+  lite/.style={rounded corners=2pt, draw=accent, fill=white, line width=0.7pt,
+               inner sep=5pt, align=center, font=\sffamily\small},
+  py/.style={rounded corners=2pt, draw=pyaccent, fill=pybg, line width=0.7pt, dashed,
+             inner sep=5pt, align=center, font=\sffamily},
+  entry/.style={font=\ttfamily\small, text=accent!75!black},
+  flow/.style={-{Latex[length=2.2mm]}, draw=accent, line width=0.7pt},
+  pyflow/.style={-{Latex[length=2.2mm]}, draw=pyaccent, line width=0.8pt},
+]
+% top pipeline
+\node[entry] (run) at (0,4.3) {sia run};
+\node[box] (orch) at (2.5,4.3) {orchestrator};
+\node[box] (cm) at (5.5,4.3) {context\_manager};
+\node[box] (res) at (8.8,4.3) {results};
+% left branch: meta/feedback -> native runners
+\node[box] (agents) at (2.4,2.8) {Meta / Feedback agents};
+\node[lite, text width=6.0cm] (runners) at (2.6,1.25)
+  {\textbf{Native LLM runners}\,\;[\texttt{feature: llm}]\\[2pt]
+   \texttt{claude} $\cdot$ \texttt{openhands} $\cdot$ \texttt{pydantic-ai}\\[2pt]
+   {\footnotesize transports $\cdot$ trajectory $\cdot$ retry $\cdot$ structured}};
+% right branch: target agent (in Rust) -> Python subprocess (outside boundary)
+\node[box] (target) at (8.0,2.8) {Target agent};
+\node[box] (web) at (2.6,-0.15) {\texttt{sia web} $\;\to\;$ Axum visualizer of \texttt{./runs}};
+% rust trust boundary (encloses all native components)
+\begin{scope}[on background layer]
+  \node[rounded corners=5pt, draw=accent!60, line width=1pt, dash pattern=on 3pt off 2pt,
+        fill=accent!4, fit=(run)(res)(runners)(web)(target), inner sep=11pt] (rust) {};
+\end{scope}
+\node[anchor=south west, font=\sffamily\bfseries\small, text=accent] at (rust.north west)
+  {sia (Rust)};
+% Python subprocess: outside the boundary
+\node[py, text width=4.4cm] (py) at (8.0,-1.9)
+  {Python subprocess\\(optional Docker sandbox)\\via \texttt{evaluate.py}};
+% arrows
+\draw[flow] (run) -- (orch);
+\draw[flow] (orch) -- (cm);
+\draw[flow] (cm) -- (res);
+\draw[flow] (orch) -- (agents);
+\draw[flow] (agents) -- (runners);
+\draw[flow] (orch.south) to[out=-90,in=90] (target.north);
+\draw[pyflow] (target) -- (py);
+\end{tikzpicture}%
+}
+\caption{The \texttt{sia\_rust} architecture. Native Rust meta/feedback runners drive
+the LLM agents inside the trusted boundary; the Target-Agent is always executed as a
+separate Python subprocess (optionally Docker-sandboxed) via the \texttt{evaluate.py}
+contract.}
 \label{fig:arch}
 \end{figure}
 
