@@ -495,6 +495,21 @@ reference, not a real-model trainer. A runnable example task exists, but it is a
 demonstration, not a benchmark study. Producing such studies is future work
 (Section 7).
 
+### 5.5 Reproducibility statement
+
+The repository defines a single authoritative reproducibility standard in
+[`docs/REPRODUCIBILITY.md`](../REPRODUCIBILITY.md): the exact per-run and
+per-generation artifact set (real filenames + JSON schemas), the mandatory
+metadata to report (git commit, profiles, model slugs, provider/`client_kind`,
+task, generation count), and a third-party verification path that separates
+*verifying the implementation* (offline, no keys: `cargo test`, the
+`scripts/parity_check.py` parity gate, and `sia web`) from *reproducing a live
+run* (keys required). It is explicit that, because LLM sampling is involved and
+**no random seed is set or recorded**, live runs are not bit-reproducible:
+reproducibility here means the same artifact set/schema plus the byte-parity-tested
+deterministic core (Section 5.1), not identical model text. Consistent with
+Section 5.4, a live end-to-end run remains **unvalidated** (issue #93).
+
 ---
 
 ## 6. Discussion, Limitations & Future Work
