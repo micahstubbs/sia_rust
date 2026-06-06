@@ -12,11 +12,13 @@ pub mod context_manager;
 pub mod error;
 pub mod io_utils;
 pub mod layout;
+pub mod orchestrator;
 pub mod profiles;
 pub mod prompts;
 pub mod pyfmt;
 pub mod providers;
 pub mod results;
+pub mod run_setup;
 pub mod task_files;
 
 pub use task_files::TaskFiles;
