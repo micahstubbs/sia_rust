@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Shared Project Instructions
+
+@AGENTS.md
+
 
 ### Using bv as an AI sidecar
 
