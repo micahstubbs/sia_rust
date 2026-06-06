@@ -214,5 +214,8 @@ task_1/public/data
 data
 runs
 
-# Claude Code agent worktrees / local state
-.claude/
+# Claude Code agent worktrees / local state (but DO track shared project skills)
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/**
