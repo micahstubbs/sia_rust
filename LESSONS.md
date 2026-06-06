@@ -75,3 +75,27 @@ Append-only debugging and process lessons for this project.
 **Solution**: Re-ran the GitHub verification with the API path quoted: `gh api 'repos/OWNER/REPO/contents/PATH?ref=main' ...`.
 
 **Prevention**: Quote GitHub REST paths and URLs by default in shell commands. Prefer `find` over raw `ls pattern` globs when missing matches are expected or acceptable.
+
+## 2026-06-06T15:41 - Resolve Beads JSONL conflicts by preserving complete records
+
+**Problem**: After a rebase/autostash sequence, `.beads/issues.jsonl` contained Git conflict markers and `br` refused to read the project tracker.
+
+**Root Cause**: Beads exports are line-oriented JSONL. Concurrent agents can append different issue records at nearby positions, so Git may mark the export as conflicted even when both sides are valid independent issue records.
+
+**Lesson**: Treat `.beads/issues.jsonl` conflicts as record-preservation problems, not ordinary prose edits. Inspect each conflict hunk, keep complete JSON records from both sides when they represent distinct issue IDs, then verify that no conflict markers remain before running `br`.
+
+**Solution**: Compared the conflict hunk and index stages, replaced the marker block with both complete issue records, cleared the unmerged index state, and reran `br show` successfully before closing the active issue.
+
+**Prevention**: After rebases, stash pops, or multi-agent tracker edits, run `grep -n '<<<<<<<\\|=======\\|>>>>>>>' .beads/issues.jsonl` before invoking `br`. If a tracker conflict is unrelated to the current commit, resolve the working file but keep it out of unrelated artifact commits.
+
+## 2026-06-06T15:41 - Keep PDF layout verifier constants in sync with the LaTeX template
+
+**Problem**: Improving the fork report's two-column density required changing the m2p LaTeX geometry and spacing while keeping its automated layout verification meaningful.
+
+**Root Cause**: The m2p verifier computes expected margin, column, and gutter pixels from hard-coded geometry constants. If the LaTeX template changes without matching verifier constants, the checker can report false positives or miss real layout regressions.
+
+**Lesson**: When tuning a generated PDF template, update the renderer and verifier as one unit, then regenerate the Markdown, TeX, and PDF artifact set together.
+
+**Solution**: Tightened the m2p template margins, column gap, leading, paragraph skip, heading spacing, and title block, then updated the verifier constants to the same geometry before regenerating the report.
+
+**Prevention**: For any m2p geometry change, search for both LaTeX geometry values and verifier constants in `scripts/m2p.py`. Run m2p with verification enabled and inspect the resulting page count and visual layout before committing.
