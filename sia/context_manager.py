@@ -287,11 +287,7 @@ class ContextManager:
                 if accuracy > best_metric:
                     best_metric = accuracy
                     best_gen = g
-        best_performance = (
-            f'Generation {best_gen["gen_num"]} ({best_metric:.2f}% accuracy)'
-            if best_gen
-            else "N/A"
-        )
+        best_performance = f"Generation {best_gen['gen_num']} ({best_metric:.2f}% accuracy)" if best_gen else "N/A"
 
         # Calculate evolution
         evolution_text = "N/A"
