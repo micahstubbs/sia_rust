@@ -37,3 +37,42 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
+
+  parity:
+    # Cross-language gate: the reference Python implementation and the Rust port
+    # must produce byte-identical output on the same inputs (issue #29/#30).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python test deps
+        run: uv pip install --system pydantic fastapi uvicorn httpx pytest
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build parity helper
+        run: cargo build --bin sia-parity
+
+      - name: Python reference test suite
+        run: python -m pytest -q
+
+      - name: Differential parity (Python ⇄ Rust)
+        run: python scripts/parity_check.py
