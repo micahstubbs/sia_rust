@@ -3,7 +3,7 @@
 This document summarizes the project-specific contributions in
 `micahstubbs/sia_rust`. It is based on a project-wide review of the Rust source,
 Python bridge, tests, CI, documentation, benchmark assets, and eval harness as of
-commit `c5af1d2`.
+commit `4a18736`.
 
 ## What We Inherited
 
@@ -197,9 +197,11 @@ running SIA against multiple hosted model providers.
 Key evidence:
 
 - Bundled providers: `sia/defaults/providers/anthropic.json`,
-  `gemini.json`, `nebius.json`, `openai.json`, and `together.json`.
+  `gemini.json`, `nebius.json`, `openai.json`, `tinker.json`, and
+  `together.json`.
 - Bundled profiles: default Claude profiles plus Nebius, Gemini, and GPT-OSS
-  target/meta profiles in `sia/defaults/profiles/`.
+  target/meta profiles, including Tinker-backed GPT-OSS and Qwen3 target
+  profiles in `sia/defaults/profiles/`.
 - `src/api_keys.rs`, `src/env_file.rs`, and `docs/CREDENTIALS.md` document and
   implement credential resolution, including `.env` loading with real env vars
   taking precedence.
