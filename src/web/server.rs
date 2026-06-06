@@ -54,6 +54,7 @@ pub fn create_app(runs_dir: impl Into<PathBuf>) -> Router {
         )
         .route("/api/runs/:run_name/telemetry", get(api_run_telemetry))
         .route("/api/runs/:run_name/metrics", get(api_run_metrics))
+        .route("/api/runs/:run_name/scheduler", get(api_scheduler_timeline))
         .route(
             "/api/runs/:run_name/gens/:gen_name/scheduler",
             get(api_scheduler_decision),
@@ -147,6 +148,18 @@ async fn api_run_telemetry(State(root): State<AppState>, Path(run_name): Path<St
 async fn api_run_metrics(State(root): State<AppState>, Path(run_name): Path<String>) -> Response {
     match runs_data::get_run_metrics_summary(&root, &run_name) {
         Some(metrics) => Json(metrics).into_response(),
+        None => not_found(&format!("Run not found: {run_name}")),
+    }
+}
+
+// Run-level scheduler decision timeline (issue #85). File-backed: returns the
+// ordered decisions recorded so far; there is no SSE/live streaming.
+async fn api_scheduler_timeline(
+    State(root): State<AppState>,
+    Path(run_name): Path<String>,
+) -> Response {
+    match runs_data::get_scheduler_timeline(&root, &run_name) {
+        Some(timeline) => Json(timeline).into_response(),
         None => not_found(&format!("Run not found: {run_name}")),
     }
 }

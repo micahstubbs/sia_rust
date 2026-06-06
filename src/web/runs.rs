@@ -831,6 +831,86 @@ pub fn get_weight_update(runs_root: &Path, run_name: &str, gen_name: &str) -> Op
     data.is_object().then_some(data)
 }
 
+/// Run-level scheduler decision timeline (issue #85).
+///
+/// Walks every `gen_<n>` directory under the run (in index order) and folds
+/// each generation's `scheduler_decision.json` into an ordered list, so the
+/// dashboard can render the sequence of harness-vs-weight decisions at a glance
+/// (a sparkline/timeline) without one request per generation. Mirrors
+/// [`get_run_telemetry`]'s structure and path-safety: run name is resolved via
+/// [`safe_child`] + [`run_dir_index`], generations via [`gen_dirs`].
+///
+/// Shape:
+/// ```text
+/// { run, decisions: [ {generation, decision, recommended_next,
+///   harness_efficiency, weight_efficiency, harness_plateaued, rationale}, ... ],
+///   counts: {harness, weight, both}, total: N }
+/// ```
+///
+/// Generations without a decision artifact (or with a non-object one) are
+/// skipped. Returns `Some` with `decisions: []` when the run exists but nothing
+/// is recorded yet, and `None` only when the run directory does not resolve.
+/// Best-effort, never panics.
+///
+/// Note: this is purely file-backed — there is no SSE/WebSocket live streaming
+/// infrastructure. "Live" here means the timeline reflects new decisions as
+/// generations complete and the user refreshes / navigates the dashboard.
+pub fn get_scheduler_timeline(runs_root: &Path, run_name: &str) -> Option<Value> {
+    let run_dir = safe_child(runs_root, run_name)?;
+    run_dir_index(run_name)?;
+    if !run_dir.is_dir() {
+        return None;
+    }
+
+    let mut decisions: Vec<Value> = Vec::new();
+    let (mut harness, mut weight, mut both) = (0u64, 0u64, 0u64);
+
+    for (gen_index, gen_dir) in gen_dirs(&run_dir) {
+        let data = match read_json(&gen_dir.join(SCHEDULER_DECISION_FILENAME)) {
+            Some(d) if d.is_object() => d,
+            _ => continue,
+        };
+
+        // Tally by the recorded decision; tolerate any spelling/casing.
+        match data
+            .get("decision")
+            .and_then(Value::as_str)
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("harness") => harness += 1,
+            Some("weight") => weight += 1,
+            Some("both") => both += 1,
+            _ => {}
+        }
+
+        let mut row = serde_json::Map::new();
+        // Prefer the artifact's own `generation`, fall back to the dir index.
+        let generation = data.get("generation").and_then(as_i64).unwrap_or(gen_index);
+        row.insert("generation".into(), Value::from(generation));
+        for key in [
+            "decision",
+            "recommended_next",
+            "harness_efficiency",
+            "weight_efficiency",
+            "harness_plateaued",
+            "rationale",
+        ] {
+            if let Some(v) = data.get(key) {
+                row.insert(key.into(), v.clone());
+            }
+        }
+        decisions.push(Value::Object(row));
+    }
+
+    Some(serde_json::json!({
+        "run": run_name,
+        "decisions": decisions,
+        "counts": { "harness": harness, "weight": weight, "both": both },
+        "total": decisions.len(),
+    }))
+}
+
 // --------------------------------------------------------------------------- //
 // Path safety
 // --------------------------------------------------------------------------- //
@@ -1095,6 +1175,76 @@ mod tests {
         // Traversal / bad names refused.
         assert!(get_weight_update(&root, "run_4", "..").is_none());
         assert!(get_weight_update(&root, "run_4", "gen_999").is_none());
+    }
+
+    #[test]
+    fn scheduler_timeline_orders_decisions_counts_and_skips_gaps() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("runs");
+        let run = root.join("run_7");
+        let gen0 = run.join("gen_0");
+        let gen1 = run.join("gen_1");
+        let gen2 = run.join("gen_2");
+        std::fs::create_dir_all(&gen0).unwrap();
+        std::fs::create_dir_all(&gen1).unwrap();
+        std::fs::create_dir_all(&gen2).unwrap();
+
+        // gen_0: harness decision.
+        std::fs::write(
+            gen0.join("scheduler_decision.json"),
+            json!({"generation": 0, "decision": "harness", "recommended_next": "harness",
+                   "rationale": "improving", "harness_efficiency": 0.05,
+                   "weight_efficiency": null, "harness_plateaued": false})
+            .to_string(),
+        )
+        .unwrap();
+        // gen_1: no scheduler_decision.json -> skipped.
+        // gen_2: weight decision.
+        std::fs::write(
+            gen2.join("scheduler_decision.json"),
+            json!({"generation": 2, "decision": "weight", "recommended_next": "weight",
+                   "rationale": "plateaued", "harness_efficiency": 0.001,
+                   "weight_efficiency": 0.02, "harness_plateaued": true})
+            .to_string(),
+        )
+        .unwrap();
+
+        let v = get_scheduler_timeline(&root, "run_7").expect("run exists");
+        assert_eq!(v["run"], json!("run_7"));
+
+        // Ordered, gap-skipping decisions: gen_0 then gen_2.
+        let decisions = v["decisions"].as_array().unwrap();
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(decisions[0]["generation"], json!(0));
+        assert_eq!(decisions[0]["decision"], json!("harness"));
+        assert_eq!(decisions[0]["harness_plateaued"], json!(false));
+        assert_eq!(decisions[0]["rationale"], json!("improving"));
+        assert_eq!(decisions[1]["generation"], json!(2));
+        assert_eq!(decisions[1]["decision"], json!("weight"));
+        assert_eq!(decisions[1]["weight_efficiency"], json!(0.02));
+
+        // Counts tally each decision kind; total matches the array length.
+        assert_eq!(v["counts"]["harness"], json!(1));
+        assert_eq!(v["counts"]["weight"], json!(1));
+        assert_eq!(v["counts"]["both"], json!(0));
+        assert_eq!(v["total"], json!(2));
+    }
+
+    #[test]
+    fn scheduler_timeline_empty_run_and_missing_run() {
+        // Run exists but no decisions recorded -> Some with empty decisions.
+        let (_d, root) = make_run(false);
+        let v = get_scheduler_timeline(&root, "run_3").expect("run exists");
+        assert_eq!(v["decisions"].as_array().unwrap().len(), 0);
+        assert_eq!(v["total"], json!(0));
+        assert_eq!(v["counts"]["harness"], json!(0));
+        assert_eq!(v["counts"]["weight"], json!(0));
+        assert_eq!(v["counts"]["both"], json!(0));
+
+        // Unknown run / traversal / non-run names -> None.
+        assert!(get_scheduler_timeline(&root, "run_999").is_none());
+        assert!(get_scheduler_timeline(&root, "..").is_none());
+        assert!(get_scheduler_timeline(&root, "not_a_run").is_none());
     }
 
     #[test]

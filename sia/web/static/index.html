@@ -150,6 +150,18 @@
   .tele-card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
   .tele-card .v { margin-top: 6px; font-family: var(--mono); font-size: 20px; font-weight: 600; }
   .tele-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  /* Run-level scheduler-decision timeline (#85): one cell per generation,
+     letter-coded H/W/B. File-backed; reflects new decisions on refresh. */
+  .sched-timeline { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .sched-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .sched-dot { width: 30px; height: 30px; border-radius: 8px; display: flex;
+    align-items: center; justify-content: center; font-family: var(--mono);
+    font-size: 13px; font-weight: 700; color: #fff; cursor: default;
+    border: 1px solid var(--border); }
+  .sched-dot.harness { background: var(--accent); }
+  .sched-dot.weight  { background: var(--token-out); }
+  .sched-dot.both    { background: var(--warn); color: #000; }
+  .sched-gen { color: var(--muted); font-size: 10px; font-family: var(--mono); }
   /* Chart legend chips. */
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 4px 0 10px; font-size: 12px;
     color: var(--muted); }
@@ -435,6 +447,15 @@ function renderRun(run) {
   main.append(metricsHost);
   loadMetricsChart(run.name, metricsHost, run.generations);
 
+  // Run-level scheduler decision timeline (#85): the harness-vs-weight choices
+  // across every generation at a glance. Fetched lazily; degrades to a clean
+  // "no decisions yet" state.
+  const schedHost = h("div", { class: "gen-chart" },
+    h("div", { class: "k muted" }, "SCHEDULER DECISIONS"),
+    h("div", { class: "spinner" }, "Loading scheduler decisions…"));
+  main.append(schedHost);
+  loadSchedulerTimeline(run.name, schedHost);
+
   VIEW.pillsRow = h("div", { class: "pill-row" });
   VIEW.genHost = h("div", {});
   main.append(VIEW.pillsRow, VIEW.genHost);
@@ -468,6 +489,54 @@ async function loadTelemetryPanel(runName, host) {
       h("div", { class: "k" }, k),
       h("div", { class: "v" }, v),
       h("div", { class: "sub" }, sub)))));
+}
+
+// ---- Run-level scheduler decision timeline (#85) ----------------------------
+// A compact horizontal sparkline: one cell per generation that recorded a
+// scheduler decision, letter-coded H (harness) / W (weight) / B (both), with a
+// tooltip carrying that generation's rationale + efficiencies. Pure file-backed
+// (no SSE/WebSocket live stream exists) — the panel reflects new decisions as
+// generations complete and the user refreshes / re-navigates the run.
+async function loadSchedulerTimeline(runName, host) {
+  let data;
+  try { data = await api(`/api/runs/${runName}/scheduler`); }
+  catch { host.innerHTML = ""; return; }
+  host.innerHTML = "";
+  host.append(h("div", { class: "k muted" }, "SCHEDULER DECISIONS"));
+
+  const decisions = (data && data.decisions) || [];
+  if (!decisions.length) {
+    host.append(h("div", { class: "muted", style: "margin-top:6px" },
+      "No scheduler decisions yet — the harness-vs-weight timeline fills in as the closed-loop step runs after each generation."));
+    return;
+  }
+
+  const fmtEff = (v) => v == null ? "n/a" : Number(v).toFixed(6);
+  const letter = { harness: "H", weight: "W", both: "B" };
+  const timeline = h("div", { class: "sched-timeline" }, decisions.map(d => {
+    const kind = String(d.decision || "").toLowerCase();
+    const cls = letter[kind] ? kind : "harness";
+    const tip = [
+      `gen ${d.generation}: ${d.decision || "—"}`,
+      d.recommended_next ? `next: ${d.recommended_next}` : null,
+      `harness eff: ${fmtEff(d.harness_efficiency)}`,
+      `weight eff: ${fmtEff(d.weight_efficiency)}`,
+      d.harness_plateaued != null ? `plateaued: ${d.harness_plateaued ? "yes" : "no"}` : null,
+      d.rationale ? `\n${d.rationale}` : null,
+    ].filter(Boolean).join("\n");
+    return h("div", { class: "sched-cell" },
+      h("div", { class: "sched-dot " + cls, title: tip }, letter[kind] || "?"),
+      h("div", { class: "sched-gen" }, "g" + d.generation));
+  }));
+  host.append(timeline);
+
+  const c = (data && data.counts) || {};
+  const parts = [];
+  if (c.harness) parts.push(`${c.harness} harness`);
+  if (c.weight) parts.push(`${c.weight} weight`);
+  if (c.both) parts.push(`${c.both} both`);
+  host.append(h("div", { class: "muted", style: "font-size:12px;margin-top:6px" },
+    (parts.join(" · ") || "0 decisions") + ` · ${data.total} total`));
 }
 
 // ---- Performance-vs-generation chart (score line + token bars) --------------

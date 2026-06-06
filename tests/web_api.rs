@@ -195,3 +195,26 @@ async fn test_scheduler_and_weights_endpoints() {
     let (status, _b) = get(&app, "/api/runs/run_7/gens/gen_2/weights").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn test_scheduler_timeline_endpoint() {
+    let (_d, root) = make_runs_root();
+    let app = sia::web::create_app(root);
+
+    // Run-level timeline (#85): folds the one decision-bearing generation
+    // (gen_1) into an ordered list, skipping gen_2 which has no decision.
+    let (status, body) = get(&app, "/api/runs/run_7/scheduler").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["run"], json!("run_7"));
+    let decisions = v["decisions"].as_array().unwrap();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(decisions[0]["generation"], json!(1));
+    assert_eq!(decisions[0]["decision"], json!("weight"));
+    assert_eq!(v["counts"]["weight"], json!(1));
+    assert_eq!(v["total"], json!(1));
+
+    // Unknown run -> 404.
+    let (status, _b) = get(&app, "/api/runs/run_404/scheduler").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
