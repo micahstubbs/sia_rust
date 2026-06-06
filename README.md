@@ -100,5 +100,6 @@ the native LLM-runner design, parity/benchmarks/evals, and testing seams.
 - [docs/architecture.md](docs/architecture.md) — overall SIA architecture.
 - [docs/configuration.md](docs/configuration.md) — profiles, providers, config.
 - [docs/walkthrough.md](docs/walkthrough.md) — end-to-end walkthrough.
+- [docs/NEBIUS_QUICKSTART.md](docs/NEBIUS_QUICKSTART.md) — Nebius Token Factory quickstart (GPU credits + hosted models).
 - [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) — tasks, MLE-Bench, the `evaluate.py` contract.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common issues.

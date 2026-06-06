@@ -138,3 +138,8 @@ Where the Python tests patch `subprocess.run` / `subprocess.Popen`, the Rust por
 exposes injectable seams (`run_evaluation_with`, `run_target_agent_with`,
 `run_generation_with`) so the branching logic is unit-tested without a real
 interpreter — same coverage, idiomatic Rust.
+
+## Provider quickstarts
+
+- **[docs/NEBIUS_QUICKSTART.md](NEBIUS_QUICKSTART.md)** — Nebius Token Factory: get credentials,
+  run a bundled Nebius profile end-to-end, add custom provider/profile JSON, read `telemetry.json`.
