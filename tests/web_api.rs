@@ -47,6 +47,28 @@ fn make_runs_root() -> (tempfile::TempDir, std::path::PathBuf) {
     )
     .unwrap();
     std::fs::write(gen2.join("improvement.md"), "# Plan\n- do better\n").unwrap();
+    // Closed-loop artifacts (#84): gen_1 carries a scheduler decision + weight
+    // update; gen_2 carries neither (exercises 404 / empty state).
+    std::fs::write(
+        gen1.join("scheduler_decision.json"),
+        json!({
+            "generation": 1, "decision": "weight", "recommended_next": "weight",
+            "rationale": "Harness improvement has plateaued; recommending a weight update.",
+            "harness_efficiency": 0.001, "weight_efficiency": null, "harness_plateaued": true
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        gen1.join("weight_update.json"),
+        json!({
+            "generation": 1, "kind": "weight", "updater": "lora-reference-cpu",
+            "num_examples": 2, "loss_before": 0.5, "loss_after": 0.3,
+            "updated": true, "details": "lora-reference-cpu: 2 example(s)"
+        })
+        .to_string(),
+    )
+    .unwrap();
     // gen_1 carries telemetry; gen_2 does not (exercises graceful degradation).
     std::fs::write(
         gen1.join("telemetry.json"),
@@ -145,5 +167,31 @@ async fn test_telemetry_and_metrics_endpoints() {
     let (status, _b) = get(&app, "/api/runs/run_404/metrics").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _b) = get(&app, "/api/runs/run_404/telemetry").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_scheduler_and_weights_endpoints() {
+    let (_d, root) = make_runs_root();
+    let app = sia::web::create_app(root);
+
+    // Scheduler decision present on gen_1 -> 200 with artifact.
+    let (status, body) = get(&app, "/api/runs/run_7/gens/gen_1/scheduler").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["decision"], json!("weight"));
+    assert_eq!(v["harness_plateaued"], json!(true));
+
+    // Weight update present on gen_1 -> 200 with loss before/after.
+    let (status, body) = get(&app, "/api/runs/run_7/gens/gen_1/weights").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["kind"], json!("weight"));
+    assert_eq!(v["loss_after"], json!(0.3));
+
+    // Absent on gen_2 -> 404 for both.
+    let (status, _b) = get(&app, "/api/runs/run_7/gens/gen_2/scheduler").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _b) = get(&app, "/api/runs/run_7/gens/gen_2/weights").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }

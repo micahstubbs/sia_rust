@@ -652,7 +652,7 @@ function genChart(gens) {
 // ---- Generation view --------------------------------------------------------
 const GEN_TABS = [
   ["overview", "Overview"], ["code", "Agent code"], ["prompt", "Prompt"],
-  ["improvement", "Improvement"], ["trajectories", "Trajectories"], ["logs", "Logs"],
+  ["improvement", "Improvement"], ["scheduler", "Scheduler"], ["trajectories", "Trajectories"], ["logs", "Logs"],
 ];
 
 // Build the tabs bar + empty body container once per generation. The tabs bar
@@ -667,7 +667,8 @@ function buildGenScaffold(run, gen) {
 
 const TAB_RENDERERS = {
   overview: tabOverview, code: tabCode, prompt: tabPrompt,
-  improvement: tabImprovement, trajectories: tabTrajectories, logs: tabLogs,
+  improvement: tabImprovement, scheduler: tabScheduler,
+  trajectories: tabTrajectories, logs: tabLogs,
 };
 
 function showTab(run, gen, tab) {
@@ -730,6 +731,81 @@ async function tabImprovement({ run, gen, body }) {
   const text = await api(`/api/runs/${run.name}/gens/${gen.name}/artifact/improvement`);
   body.innerHTML = "";
   body.append(h("div", { class: "md", html: md(text) }));
+}
+
+// ---- Scheduler Decision + weight-update panel (issue #84) -------------------
+// Shows the adaptive scheduler's harness-vs-weight decision for this generation
+// (with rationale + efficiencies) and, when a weight update ran, its loss
+// before→after. Both fetched from the new endpoints, with a clear empty state.
+async function tabScheduler({ run, gen, body }) {
+  body.append(h("div", { class: "spinner" }, "Loading scheduler decision…"));
+  let decision = null, weights = null;
+  try { decision = await api(`/api/runs/${run.name}/gens/${gen.name}/scheduler`); }
+  catch { decision = null; }
+  try { weights = await api(`/api/runs/${run.name}/gens/${gen.name}/weights`); }
+  catch { weights = null; }
+  body.innerHTML = "";
+
+  if (!decision) {
+    body.append(h("div", { class: "muted" },
+      "No scheduler decision recorded for this generation — it appears once the closed-loop step runs after evaluation."));
+    return;
+  }
+
+  const d = String(decision.decision || "—");
+  const badgeStyle = d === "weight" ? "background:var(--token-out);color:#fff"
+    : d === "both" ? "background:var(--warn,#d8a657);color:#000"
+    : "background:var(--accent);color:#fff";
+  body.append(h("div", { class: "section-head" },
+    h("h3", {}, "Scheduler Decision"),
+    h("span", { class: "badge", style: badgeStyle }, d.toUpperCase())));
+
+  const fmtEff = (v) => v == null ? "n/a" : Number(v).toFixed(6);
+  const cards = [
+    ["Decision", d, "harness / weight / both"],
+    ["Recommended next", String(decision.recommended_next ?? "—"), "next lever"],
+    ["Harness efficiency", fmtEff(decision.harness_efficiency), "score / compute"],
+    ["Weight efficiency", fmtEff(decision.weight_efficiency), "score / compute"],
+    ["Harness plateaued", decision.harness_plateaued ? "yes" : "no", "#19 plateau signal"],
+  ];
+  body.append(h("div", { class: "tele-grid" }, cards.map(([k, v, sub]) =>
+    h("div", { class: "tele-card" },
+      h("div", { class: "k" }, k),
+      h("div", { class: "v" }, String(v)),
+      h("div", { class: "sub" }, sub)))));
+
+  if (decision.rationale) {
+    body.append(h("div", { class: "tele-card", style: "margin-top:10px" },
+      h("div", { class: "k" }, "Rationale"),
+      h("div", { class: "sub", style: "margin-top:6px;font-size:13px" }, String(decision.rationale))));
+  }
+
+  // Weight-update summary (only present on a weight/both decision that ran).
+  body.append(h("h3", { style: "margin-top:18px" }, "Weight update"));
+  if (!weights) {
+    body.append(h("div", { class: "muted" },
+      "No weight update for this generation (only runs on a weight/both decision)."));
+    return;
+  }
+  const lb = weights.loss_before, la = weights.loss_after;
+  const delta = (lb != null && la != null) ? (la - lb) : null;
+  const wcards = [
+    ["Examples", fmtInt(weights.num_examples), "training pairs"],
+    ["Loss before → after",
+      `${lb == null ? "—" : Number(lb).toFixed(6)} → ${la == null ? "—" : Number(la).toFixed(6)}`,
+      delta == null ? "" : (delta <= 0 ? `Δ ${delta.toFixed(6)} (improved)` : `Δ +${delta.toFixed(6)}`)],
+    ["Updated", weights.updated ? "yes" : "no", String(weights.updater || "")],
+  ];
+  body.append(h("div", { class: "tele-grid" }, wcards.map(([k, v, sub]) =>
+    h("div", { class: "tele-card" },
+      h("div", { class: "k" }, k),
+      h("div", { class: "v" }, String(v)),
+      h("div", { class: "sub" }, sub)))));
+  if (weights.details) {
+    body.append(h("div", { class: "tele-card", style: "margin-top:10px" },
+      h("div", { class: "k" }, "Details"),
+      h("div", { class: "sub", style: "margin-top:6px;font-size:13px" }, String(weights.details))));
+  }
 }
 
 async function tabLogs({ run, gen, body }) {

@@ -54,6 +54,14 @@ pub fn create_app(runs_dir: impl Into<PathBuf>) -> Router {
         )
         .route("/api/runs/:run_name/telemetry", get(api_run_telemetry))
         .route("/api/runs/:run_name/metrics", get(api_run_metrics))
+        .route(
+            "/api/runs/:run_name/gens/:gen_name/scheduler",
+            get(api_scheduler_decision),
+        )
+        .route(
+            "/api/runs/:run_name/gens/:gen_name/weights",
+            get(api_weight_update),
+        )
         .route("/", get(index))
         .with_state(state)
 }
@@ -140,6 +148,26 @@ async fn api_run_metrics(State(root): State<AppState>, Path(run_name): Path<Stri
     match runs_data::get_run_metrics_summary(&root, &run_name) {
         Some(metrics) => Json(metrics).into_response(),
         None => not_found(&format!("Run not found: {run_name}")),
+    }
+}
+
+async fn api_scheduler_decision(
+    State(root): State<AppState>,
+    Path((run_name, gen_name)): Path<(String, String)>,
+) -> Response {
+    match runs_data::get_scheduler_decision(&root, &run_name, &gen_name) {
+        Some(decision) => Json(decision).into_response(),
+        None => not_found("No scheduler decision found"),
+    }
+}
+
+async fn api_weight_update(
+    State(root): State<AppState>,
+    Path((run_name, gen_name)): Path<(String, String)>,
+) -> Response {
+    match runs_data::get_weight_update(&root, &run_name, &gen_name) {
+        Some(update) => Json(update).into_response(),
+        None => not_found("No weight update found"),
     }
 }
 

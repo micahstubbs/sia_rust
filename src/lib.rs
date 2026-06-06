@@ -7,6 +7,7 @@ pub mod agent_reference;
 pub mod api_keys;
 pub mod assets;
 pub mod cli;
+pub mod closed_loop;
 pub mod config;
 pub mod config_files;
 pub mod context_manager;

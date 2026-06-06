@@ -794,6 +794,44 @@ pub fn get_run_metrics_summary(runs_root: &Path, run_name: &str) -> Option<Value
 }
 
 // --------------------------------------------------------------------------- //
+// Closed-loop artifacts (issue #84)
+// --------------------------------------------------------------------------- //
+
+/// Filename of the per-generation scheduler decision (mirrors
+/// [`crate::closed_loop::SCHEDULER_DECISION_JSON`]); duplicated as a `&str` so
+/// the web data layer reads it without depending on orchestrator internals.
+const SCHEDULER_DECISION_FILENAME: &str = "scheduler_decision.json";
+
+/// Filename of the per-generation weight-update outcome (mirrors
+/// [`crate::closed_loop::WEIGHT_UPDATE_JSON`]).
+const WEIGHT_UPDATE_FILENAME: &str = "weight_update.json";
+
+/// Raw `<gen>/scheduler_decision.json` for one generation, if present.
+///
+/// Returns the parsed object the closed-loop layer writes (issue #84):
+/// `{ generation, decision, recommended_next, rationale, harness_efficiency,
+/// weight_efficiency, harness_plateaued }`. Path safety mirrors
+/// [`get_generation_telemetry`]: run/gen names are resolved through
+/// [`resolve_gen`], which refuses traversal and non-matching directory names.
+pub fn get_scheduler_decision(runs_root: &Path, run_name: &str, gen_name: &str) -> Option<Value> {
+    let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
+    let data = read_json(&gen_dir.join(SCHEDULER_DECISION_FILENAME))?;
+    data.is_object().then_some(data)
+}
+
+/// Raw `<gen>/weight_update.json` for one generation, if present.
+///
+/// Returns the parsed object the closed-loop layer writes when a weight/both
+/// decision triggers an update: `{ generation, kind, updater, num_examples,
+/// loss_before, loss_after, updated, details }`. Same path safety as
+/// [`get_scheduler_decision`].
+pub fn get_weight_update(runs_root: &Path, run_name: &str, gen_name: &str) -> Option<Value> {
+    let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
+    let data = read_json(&gen_dir.join(WEIGHT_UPDATE_FILENAME))?;
+    data.is_object().then_some(data)
+}
+
+// --------------------------------------------------------------------------- //
 // Path safety
 // --------------------------------------------------------------------------- //
 fn safe_child(parent: &Path, name: &str) -> Option<PathBuf> {
@@ -998,6 +1036,65 @@ mod tests {
         assert!(v["cumulative"].get("input_tokens").is_none());
 
         assert!(get_run_telemetry(&root, "run_999").is_none());
+    }
+
+    #[test]
+    fn scheduler_decision_reader_present_absent_and_safe() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("runs");
+        let gen1 = root.join("run_3").join("gen_1");
+        std::fs::create_dir_all(&gen1).unwrap();
+        std::fs::write(
+            gen1.join("scheduler_decision.json"),
+            json!({"generation": 1, "decision": "weight", "recommended_next": "weight",
+                   "rationale": "plateaued", "harness_efficiency": 0.001,
+                   "weight_efficiency": null, "harness_plateaued": true})
+            .to_string(),
+        )
+        .unwrap();
+
+        // Present.
+        let v = get_scheduler_decision(&root, "run_3", "gen_1").expect("decision present");
+        assert_eq!(v["decision"], json!("weight"));
+        assert_eq!(v["harness_plateaued"], json!(true));
+
+        // Absent (gen_2 not even created -> resolve_gen None).
+        assert!(get_scheduler_decision(&root, "run_3", "gen_2").is_none());
+
+        // Traversal / bad names refused.
+        assert!(get_scheduler_decision(&root, "run_3", "..").is_none());
+        assert!(get_scheduler_decision(&root, "..", "gen_1").is_none());
+        assert!(get_scheduler_decision(&root, "run_3", "gen_999").is_none());
+    }
+
+    #[test]
+    fn weight_update_reader_present_absent_and_safe() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("runs");
+        let gen1 = root.join("run_4").join("gen_1");
+        let gen2 = root.join("run_4").join("gen_2");
+        std::fs::create_dir_all(&gen1).unwrap();
+        std::fs::create_dir_all(&gen2).unwrap();
+        std::fs::write(
+            gen1.join("weight_update.json"),
+            json!({"generation": 1, "kind": "weight", "updater": "lora-reference-cpu",
+                   "num_examples": 2, "loss_before": 0.5, "loss_after": 0.3,
+                   "updated": true, "details": "ok"})
+            .to_string(),
+        )
+        .unwrap();
+
+        // Present.
+        let v = get_weight_update(&root, "run_4", "gen_1").expect("weight update present");
+        assert_eq!(v["kind"], json!("weight"));
+        assert_eq!(v["loss_after"], json!(0.3));
+
+        // Absent on a real gen dir without the artifact.
+        assert!(get_weight_update(&root, "run_4", "gen_2").is_none());
+
+        // Traversal / bad names refused.
+        assert!(get_weight_update(&root, "run_4", "..").is_none());
+        assert!(get_weight_update(&root, "run_4", "gen_999").is_none());
     }
 
     #[test]

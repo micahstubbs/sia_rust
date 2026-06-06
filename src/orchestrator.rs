@@ -680,6 +680,31 @@ pub fn run_generation_with(
     // Run evaluation (if evaluate.py exists).
     let _ = run_evaluation(&gen_dir, dataset_dir, &run_setup.venv_dir, env_config);
 
+    // Closed-loop step (#84): record the adaptive scheduler's harness-vs-weight
+    // decision for this generation and, when it recommends weights, run an
+    // observable CPU-reference weight update. Purely additive and best-effort —
+    // it only writes NEW artifacts + a log line, guards every failure, and never
+    // affects this function's control flow or return value.
+    {
+        let decision = crate::closed_loop::record_scheduler_decision(
+            &layout,
+            current_gen,
+            &crate::scheduler::SchedulerConfig::default(),
+        );
+        if let Some(d) = &decision {
+            if let Some(kind) = d.get("decision").and_then(|v| v.as_str()) {
+                let _ = crate::closed_loop::maybe_run_weight_update(
+                    &layout,
+                    current_gen,
+                    kind,
+                    &crate::weights::WeightUpdateConfig::default(),
+                );
+                let rationale = d.get("rationale").and_then(|v| v.as_str()).unwrap_or("");
+                println!("[scheduler] gen {current_gen}: decision={kind} — {rationale}");
+            }
+        }
+    }
+
     // Add generation to context.
     let improvement_md_path = layout.improvement_md(current_gen);
     let execution_type = if Path::new(&layout.agent_execution_dir(current_gen)).is_dir() {
