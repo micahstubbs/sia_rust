@@ -48,6 +48,7 @@ pub mod anthropic_api;
 pub mod claude_runner;
 pub mod openai_api;
 pub mod openhands_runner;
+pub mod pydantic_ai_runner;
 mod rig_runner;
 pub mod tools;
 mod trajectory;
@@ -63,6 +64,7 @@ pub use openai_api::{
     FunctionCall, FunctionDef, HttpChatTransport, ToolCall,
 };
 pub use openhands_runner::{run_openhands_agent, OpenHandsEventLog, OpenHandsRunSummary};
+pub use pydantic_ai_runner::run_pydantic_ai_agent;
 pub use rig_runner::RigAgentRunner;
 pub use trajectory::AgentTrajectory;
 pub use trajectory_middleware::{
