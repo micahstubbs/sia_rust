@@ -38,6 +38,12 @@ jobs:
       - name: Test
         run: cargo test --all-targets
 
+      - name: Clippy (llm feature)
+        run: cargo clippy --all-targets --features llm -- -D warnings
+
+      - name: Test (llm feature)
+        run: cargo test --all-targets --features llm
+
   parity:
     # Cross-language gate: the reference Python implementation and the Rust port
     # must produce byte-identical output on the same inputs (issue #29/#30).

@@ -13,6 +13,8 @@ pub mod context_manager;
 pub mod error;
 pub mod io_utils;
 pub mod layout;
+#[cfg(feature = "llm")]
+pub mod llm;
 pub mod orchestrator;
 pub mod profiles;
 pub mod prompts;
