@@ -6,6 +6,12 @@ credentials, point sia_rust at a bundled Nebius profile, and read per-generation
 token telemetry — with nothing invented: every flag, profile id, and model slug
 below was read directly from the repository files.
 
+> **Verifying model slugs:** Nebius version-stamps and occasionally renames
+> model slugs. Before a run, confirm each bundled profile's slug against the
+> live `/v1/models` catalog — see [NEBIUS_MODELS.md](NEBIUS_MODELS.md) for the
+> `scripts/verify_nebius_models.sh` helper, the offline-skipped verification
+> test, and a per-profile "verified?" table.
+
 ---
 
 ## 1. What you get
@@ -252,6 +258,10 @@ the Nebius Token Factory console — model identifiers are case-sensitive and
 version-stamped (e.g. `deepseek-ai/DeepSeek-R1-0528`, not `DeepSeek-R1`).
 The bundled profiles use the slugs current at the time they were added; update
 your custom profile JSON if a model is renamed or versioned.
+
+To verify the exact live slugs (and which bundled profiles are confirmed vs.
+need a live check), run `scripts/verify_nebius_models.sh` or the `#[ignore]`
+test — see [NEBIUS_MODELS.md](NEBIUS_MODELS.md) for both.
 
 ### `claude` agent_impl with a Nebius provider
 

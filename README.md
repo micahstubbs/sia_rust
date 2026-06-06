@@ -101,6 +101,7 @@ the native LLM-runner design, parity/benchmarks/evals, and testing seams.
 - [docs/configuration.md](docs/configuration.md) — profiles, providers, config.
 - [docs/walkthrough.md](docs/walkthrough.md) — end-to-end walkthrough.
 - [docs/NEBIUS_QUICKSTART.md](docs/NEBIUS_QUICKSTART.md) — Nebius Token Factory quickstart (GPU credits + hosted models).
+- [docs/NEBIUS_MODELS.md](docs/NEBIUS_MODELS.md) — verifying Nebius model slugs against the live `/v1/models` catalog (script + `#[ignore]` test + per-profile verified status).
 - [docs/HACKATHON_DEMO.md](docs/HACKATHON_DEMO.md) — hackathon demo script, judging narrative & run-of-show.
 - [docs/HACKATHON_DECK.md](docs/HACKATHON_DECK.md) — slide deck outline (7 slides, talking points, one-liners) + reproducibility one-pager.
 - [docs/paper/sia_rust_preprint.md](docs/paper/sia_rust_preprint.md) — preprint-style draft paper on the native Rust re-implementation & extensions (system/experience report).
