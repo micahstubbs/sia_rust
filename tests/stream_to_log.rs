@@ -17,6 +17,7 @@ fn test_stream_to_log_captures_heavy_stderr_and_exit_code() {
     let code = stream_to_log(
         &["sh".to_string(), "-c".to_string(), script.to_string()],
         log.to_str().unwrap(),
+        10,
     )
     .expect("stream_to_log should not error");
 

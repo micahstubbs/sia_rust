@@ -7,7 +7,7 @@ use clap::ArgMatches;
 use crate::agent_impls::run_agent;
 use crate::agent_reference::{copy_reference_into, resolve_agent_reference};
 use crate::config::Config;
-use crate::error::SiaResult;
+use crate::error::{SiaError, SiaResult};
 use crate::layout::{names, resolve_task_dir, RunLayout, TaskLayout};
 use crate::orchestrator::{
     run_feedback_agent, run_generation_with, run_target_agent, FeedbackArgs,
@@ -117,7 +117,12 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
         &resolved_ref,
         Path::new(&run_setup.meta_agent_working_directory),
     )
-    .ok();
+    .map_err(|e| {
+        SiaError::new(format!(
+            "failed to copy agent reference into {}: {e}",
+            run_setup.meta_agent_working_directory
+        ))
+    })?;
     let reference_dir = if resolved_ref.ref_dir.is_some() {
         Some(run_setup.meta_agent_working_directory.clone())
     } else {

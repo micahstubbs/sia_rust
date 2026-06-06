@@ -3,16 +3,32 @@
 //! (load_agent_execution + run_evaluation parts).
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::json;
 use sia::config::Config;
 use sia::orchestrator::{
-    build_sandbox_cmd, build_target_cmd, load_agent_execution, run_evaluation_with,
-    run_target_agent_with, EvalOutcome,
+    build_sandbox_cmd, build_target_cmd, load_agent_execution, run_evaluation, run_evaluation_with,
+    run_target_agent, run_target_agent_with, EvalOutcome,
 };
 
 fn tmp() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
+}
+
+#[cfg(unix)]
+fn make_fake_venv(root: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let venv = root.join("venv");
+    let bin = venv.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let python = bin.join("python");
+    std::fs::write(&python, "#!/bin/sh\nexec python3 \"$@\"\n").unwrap();
+    let mut perms = std::fs::metadata(&python).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&python, perms).unwrap();
+    venv
 }
 
 // --------------------------- load_agent_execution --------------------------- //
@@ -309,6 +325,50 @@ fn test_run_evaluation_honors_injected_timeout() {
     assert_eq!(*captured.lock().unwrap(), 123);
 }
 
+#[cfg(unix)]
+#[test]
+fn test_run_evaluation_timeout_kills_child_process() {
+    let d = tmp();
+    let gen_dir = d.path().join("gen_1");
+    std::fs::create_dir(&gen_dir).unwrap();
+    let task_dir = d.path().join("task");
+    make_task_with_eval(&task_dir);
+    let evaluate_script = task_dir.join("data").join("public").join("evaluate.py");
+    std::fs::write(
+        &evaluate_script,
+        r#"
+import pathlib
+import sys
+import time
+
+gen_dir = pathlib.Path(sys.argv[sys.argv.index("--gen-dir") + 1])
+time.sleep(2)
+(gen_dir / "late_marker.txt").write_text("late")
+"#,
+    )
+    .unwrap();
+    let venv = make_fake_venv(d.path());
+    let cfg = Config {
+        eval_timeout: 1,
+        ..Config::default()
+    };
+
+    let result = run_evaluation(
+        gen_dir.to_str().unwrap(),
+        task_dir.to_str().unwrap(),
+        venv.to_str().unwrap(),
+        &cfg,
+    );
+
+    assert_eq!(result["status"], "error");
+    assert!(result["reason"].as_str().unwrap().contains("timed out"));
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        !gen_dir.join("late_marker.txt").exists(),
+        "timed-out evaluator should be killed before it can write late artifacts"
+    );
+}
+
 // -------------------------------- sandbox --------------------------------- //
 
 #[test]
@@ -361,6 +421,52 @@ fn test_sandbox_none_uses_standard_command() {
     assert!(!cmd[0].contains("docker"));
 }
 
+#[cfg(unix)]
+#[test]
+fn test_run_target_agent_honors_wall_clock_timeout() {
+    let d = tmp();
+    let gen_dir = d.path().join("gen_1");
+    std::fs::create_dir(&gen_dir).unwrap();
+    let target_agent = gen_dir.join("target_agent.py");
+    std::fs::write(
+        &target_agent,
+        r#"
+import pathlib
+import time
+
+time.sleep(2)
+pathlib.Path(__file__).with_name("late_marker.txt").write_text("late")
+print("late")
+"#,
+    )
+    .unwrap();
+    let venv = make_fake_venv(d.path());
+    let stdout_log = gen_dir.join("stdout.log");
+    let cfg = Config {
+        docker_timeout: 1,
+        ..Config::default()
+    };
+
+    let (success, stdout, _stderr, error_msg) = run_target_agent(
+        venv.to_str().unwrap(),
+        target_agent.to_str().unwrap(),
+        "/data",
+        gen_dir.to_str().unwrap(),
+        stdout_log.to_str().unwrap(),
+        "none",
+        &cfg,
+    );
+
+    assert!(!success, "target execution should fail on timeout");
+    assert!(error_msg.contains("timed out"), "{error_msg}");
+    assert!(!stdout.contains("late"), "{stdout}");
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        !gen_dir.join("late_marker.txt").exists(),
+        "timed-out target agent should be killed before writing late artifacts"
+    );
+}
+
 // ------------------------- run_target_agent (seam) ------------------------- //
 
 #[test]
@@ -371,7 +477,7 @@ fn test_run_target_agent_success() {
     let stdout_log = gen_dir.join("stdout.log").to_string_lossy().into_owned();
     std::fs::write(gen_dir.join("target_agent.py"), "print('ok')").unwrap();
 
-    let runner = |_cmd: &[String], log: &str| -> std::io::Result<i32> {
+    let runner = |_cmd: &[String], log: &str, _timeout: u64| -> std::io::Result<i32> {
         std::fs::write(log, "line1\n")?;
         Ok(0)
     };
@@ -396,7 +502,7 @@ fn test_run_target_agent_failure() {
     std::fs::create_dir(&gen_dir).unwrap();
     let stdout_log = gen_dir.join("stdout.log").to_string_lossy().into_owned();
 
-    let runner = |_cmd: &[String], log: &str| -> std::io::Result<i32> {
+    let runner = |_cmd: &[String], log: &str, _timeout: u64| -> std::io::Result<i32> {
         std::fs::write(log, "error\n")?;
         Ok(1)
     };

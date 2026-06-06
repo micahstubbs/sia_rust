@@ -107,6 +107,29 @@ def test_finalize_with_metrics(context_mgr, run_dir):
     assert "Summary Statistics" in content
 
 
+def test_finalize_without_metrics_reports_no_best_performance(context_mgr, run_dir):
+    gen1 = run_dir / "gen_1"
+
+    context_mgr.add_generation(
+        gen_num=1,
+        gen_data={
+            "success": True,
+            "timestamp": "2025-01-01 00:00:00",
+            "duration": 5.0,
+            "agent_path": str(gen1 / "target_agent.py"),
+            "gen_dir": str(gen1),
+            "improvement_path": None,
+            "execution_type": "Single",
+        },
+    )
+
+    context_mgr.finalize()
+
+    content = (run_dir / "context.md").read_text()
+    assert "**Best Performance**: N/A" in content
+    assert "-inf" not in content
+
+
 @pytest.mark.usefixtures("run_dir")
 @patch("sia.context_manager.ContextManager._generate_llm_summary", return_value=None)
 def test_multiple_generations_track_deltas(mock_llm, context_mgr, run_dir):

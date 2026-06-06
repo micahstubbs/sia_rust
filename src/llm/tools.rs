@@ -78,29 +78,33 @@ fn resolve_in_sandbox(working_dir: &Path, rel: &str) -> Result<PathBuf, String> 
 /// On timeout the child is killed and a timeout message is returned. A non-zero
 /// exit status is reported alongside the captured output.
 pub fn bash(working_dir: &Path, command: &str, timeout_secs: u64) -> String {
-    let child = Command::new("sh")
+    let mut child = match Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(working_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn();
-
-    let mut child = match child {
+        .spawn()
+    {
         Ok(c) => c,
         Err(e) => return format!("{ERROR_PREFIX} failed to spawn shell: {e}"),
     };
 
+    let h_out = read_stream(child.stdout.take());
+    let h_err = read_stream(child.stderr.take());
+
     // Poll for completion with a deadline; kill on timeout.
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_status)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) => {
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let _ = h_out.join();
+                    let _ = h_err.join();
                     return format!(
                         "{ERROR_PREFIX} command timed out after {timeout_secs}s and was killed: {command}"
                     );
@@ -109,19 +113,28 @@ pub fn bash(working_dir: &Path, command: &str, timeout_secs: u64) -> String {
             }
             Err(e) => {
                 let _ = child.kill();
+                let _ = child.wait();
+                let _ = h_out.join();
+                let _ = h_err.join();
                 return format!("{ERROR_PREFIX} failed while waiting for command: {e}");
             }
         }
-    }
+    };
 
-    let output = match child.wait_with_output() {
-        Ok(o) => o,
-        Err(e) => return format!("{ERROR_PREFIX} failed to collect command output: {e}"),
+    let stdout = match h_out.join() {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(e)) => return format!("{ERROR_PREFIX} failed to collect command stdout: {e}"),
+        Err(_) => return format!("{ERROR_PREFIX} stdout reader thread panicked"),
+    };
+    let stderr = match h_err.join() {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(e)) => return format!("{ERROR_PREFIX} failed to collect command stderr: {e}"),
+        Err(_) => return format!("{ERROR_PREFIX} stderr reader thread panicked"),
     };
 
     let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    combined.push_str(&String::from_utf8_lossy(&stdout));
+    let stderr = String::from_utf8_lossy(&stderr);
     if !stderr.is_empty() {
         if !combined.is_empty() && !combined.ends_with('\n') {
             combined.push('\n');
@@ -129,7 +142,7 @@ pub fn bash(working_dir: &Path, command: &str, timeout_secs: u64) -> String {
         combined.push_str(&stderr);
     }
 
-    let code = output.status.code();
+    let code = status.code();
     match code {
         Some(0) => {
             if combined.is_empty() {
@@ -141,6 +154,18 @@ pub fn bash(working_dir: &Path, command: &str, timeout_secs: u64) -> String {
         Some(c) => format!("{combined}\n[exit code: {c}]"),
         None => format!("{combined}\n[terminated by signal]"),
     }
+}
+
+fn read_stream<R: std::io::Read + Send + 'static>(
+    stream: Option<R>,
+) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut stream) = stream {
+            std::io::Read::read_to_end(&mut stream, &mut bytes)?;
+        }
+        Ok(bytes)
+    })
 }
 
 /// Read a file resolved under `working_dir`.
@@ -470,6 +495,19 @@ mod tests {
         let result = bash(dir.path(), "sleep 5", 1);
         assert!(is_error_result(&result), "{result}");
         assert!(result.contains("timed out"));
+    }
+
+    #[test]
+    fn bash_drains_large_stderr_before_waiting_for_exit() {
+        let dir = tmp();
+        let result = bash(
+            dir.path(),
+            "python3 -c 'import sys; sys.stderr.write(\"x\" * 200000); sys.stderr.flush(); print(\"done\")'",
+            2,
+        );
+        assert!(!is_error_result(&result), "{result}");
+        assert!(result.contains("done"), "{result}");
+        assert!(result.len() > 100_000, "expected large captured output");
     }
 
     #[test]

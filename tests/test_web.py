@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from sia.config import Config
 from sia.web import runs as rd
 
 
@@ -98,6 +99,23 @@ def test_eval_details_and_artifacts(runs_root):
     assert rd.get_artifact_text(runs_root, "run_7", "gen_1", "target_agent") == "print('hello')\n"
     improvement = rd.get_artifact_text(runs_root, "run_7", "gen_2", "improvement")
     assert improvement is not None and improvement.startswith("# Plan")
+
+
+def test_oversized_artifact_text_is_omitted(runs_root):
+    artifact = runs_root / "run_7" / "gen_1" / "target_agent.py"
+    artifact.write_text("x" * (Config().MAX_CONTEXT_FILE_SIZE + 1), encoding="utf-8")
+
+    assert rd.get_artifact_text(runs_root, "run_7", "gen_1", "target_agent") is None
+
+
+def test_oversized_eval_json_is_omitted(runs_root):
+    eval_results = runs_root / "run_7" / "gen_1" / "evaluation_results.json"
+    eval_results.write_text(
+        json.dumps({"details": [], "padding": "x" * (Config().MAX_CONTEXT_FILE_SIZE + 1)}),
+        encoding="utf-8",
+    )
+
+    assert rd.get_eval_details(runs_root, "run_7", "gen_1") is None
 
 
 def test_trajectory_normalization(runs_root):

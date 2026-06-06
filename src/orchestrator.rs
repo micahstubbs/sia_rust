@@ -15,7 +15,7 @@ use serde_json::{json, Map, Value};
 use crate::agent_reference::{copy_reference_into, ResolvedAgentReference};
 use crate::config::Config;
 use crate::context_manager::GenData;
-use crate::error::SiaResult;
+use crate::error::{SiaError, SiaResult};
 use crate::io_utils::file_size_ok;
 use crate::layout::{names, venv_python_path, RunLayout, TaskLayout};
 use crate::profiles::MetaAgentProfile;
@@ -224,33 +224,73 @@ fn real_eval_runner(cmd: &[String], timeout: u64) -> EvalOutcome {
 
 fn run_command_with_timeout(cmd: &[String], timeout: u64) -> EvalOutcome {
     use std::process::{Command, Stdio};
-    use std::sync::mpsc;
+    use std::time::Duration;
 
     let mut command = Command::new(&cmd[0]);
     command
         .args(&cmd[1..])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let child = match command.spawn() {
+    let mut child = match command.spawn() {
         Ok(c) => c,
         Err(e) => return EvalOutcome::SpawnError(e.to_string()),
     };
 
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let out = child.wait_with_output();
-        let _ = tx.send(out);
-    });
+    let h_out = read_child_stream(child.stdout.take());
+    let h_err = read_child_stream(child.stderr.take());
+    let deadline = Instant::now() + Duration::from_secs(timeout.max(1));
 
-    match rx.recv_timeout(std::time::Duration::from_secs(timeout.max(1))) {
-        Ok(Ok(output)) => EvalOutcome::Completed {
-            returncode: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        },
-        Ok(Err(e)) => EvalOutcome::SpawnError(e.to_string()),
-        Err(_) => EvalOutcome::TimedOut,
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = h_out.join();
+                    let _ = h_err.join();
+                    return EvalOutcome::TimedOut;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = h_out.join();
+                let _ = h_err.join();
+                return EvalOutcome::SpawnError(e.to_string());
+            }
+        }
+    };
+
+    let stdout = match h_out.join() {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(e)) => return EvalOutcome::SpawnError(e.to_string()),
+        Err(_) => return EvalOutcome::SpawnError("stdout reader thread panicked".to_string()),
+    };
+    let stderr = match h_err.join() {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(e)) => return EvalOutcome::SpawnError(e.to_string()),
+        Err(_) => return EvalOutcome::SpawnError("stderr reader thread panicked".to_string()),
+    };
+
+    EvalOutcome::Completed {
+        returncode: status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
     }
+}
+
+fn read_child_stream<R: std::io::Read + Send + 'static>(
+    stream: Option<R>,
+) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut stream) = stream {
+            std::io::Read::read_to_end(&mut stream, &mut bytes)?;
+        }
+        Ok(bytes)
+    })
 }
 
 // --------------------------------------------------------------------------- //
@@ -320,9 +360,14 @@ pub fn build_target_cmd(
 /// buffer (~64 KiB) to stderr would otherwise block forever while we only read
 /// stdout. Merging stderr into the log also preserves failure diagnostics (the
 /// feedback prompt's "last 10 lines of output" come from this log).
-pub fn stream_to_log(cmd: &[String], stdout_log_file: &str) -> std::io::Result<i32> {
+pub fn stream_to_log(
+    cmd: &[String],
+    stdout_log_file: &str,
+    timeout_secs: u64,
+) -> std::io::Result<i32> {
     use std::process::{Command, Stdio};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     let log_fh = std::fs::File::create(stdout_log_file)?;
     let mut child = Command::new(&cmd[0])
@@ -334,12 +379,35 @@ pub fn stream_to_log(cmd: &[String], stdout_log_file: &str) -> std::io::Result<i
     let log = Arc::new(Mutex::new(log_fh));
     let h_out = pump_to_log(child.stdout.take(), Arc::clone(&log));
     let h_err = pump_to_log(child.stderr.take(), Arc::clone(&log));
-    // Join the pumps before wait(): the pipes close on child exit, so the threads
-    // finish, and only then do we reap the process.
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs.max(1));
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    h_out.join().expect("stdout pump thread panicked")?;
+                    h_err.join().expect("stderr pump thread panicked")?;
+                    if let Ok(mut fh) = log.lock() {
+                        let _ = writeln!(
+                            fh,
+                            "Target agent timed out after {timeout_secs}s and was killed."
+                        );
+                    }
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("Target agent timed out after {timeout_secs}s"),
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    };
+
     h_out.join().expect("stdout pump thread panicked")?;
     h_err.join().expect("stderr pump thread panicked")?;
-
-    let status = child.wait()?;
     Ok(status.code().unwrap_or(-1))
 }
 
@@ -363,7 +431,7 @@ fn pump_to_log<R: std::io::Read + Send + 'static>(
 }
 
 /// Process runner seam: `(cmd, stdout_log_file) -> exit code`.
-pub type ProcRunner<'a> = dyn Fn(&[String], &str) -> std::io::Result<i32> + 'a;
+pub type ProcRunner<'a> = dyn Fn(&[String], &str, u64) -> std::io::Result<i32> + 'a;
 
 /// Run the target agent (sandbox or plain) via an injectable process runner.
 #[allow(clippy::too_many_arguments)]
@@ -385,7 +453,7 @@ pub fn run_target_agent_with(
         build_target_cmd(&python_exec, target_agent_path, abs_dataset_dir, gen_dir)
     };
 
-    match runner(&cmd, stdout_log_file) {
+    match runner(&cmd, stdout_log_file, env_config.docker_timeout) {
         Ok(return_code) => {
             let stdout = std::fs::read_to_string(stdout_log_file).unwrap_or_default();
             if return_code != 0 {
@@ -401,6 +469,10 @@ pub fn run_target_agent_with(
             String::new(),
             format!("Target agent file not found: {target_agent_path}"),
         ),
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+            let stdout = std::fs::read_to_string(stdout_log_file).unwrap_or_default();
+            (false, stdout, String::new(), e.to_string())
+        }
         Err(e) => {
             let stdout = std::fs::read_to_string(stdout_log_file).unwrap_or_default();
             (
@@ -662,7 +734,7 @@ pub fn run_generation_with(
     // Install this generation's declared dependencies (if any) before running.
     let gen_requirements = format!("{gen_dir}/{}", names::REQUIREMENTS_TXT);
     if Path::new(&gen_requirements).is_file() {
-        let _ = install_requirements(&run_setup.venv_dir, &gen_requirements);
+        install_requirements(&run_setup.venv_dir, &gen_requirements)?;
     }
 
     let start = Instant::now();
@@ -810,13 +882,27 @@ pub fn run_feedback_agent(
         requirements_dir,
     );
 
-    std::fs::create_dir_all(args.next_gen_dir).ok();
+    std::fs::create_dir_all(args.next_gen_dir).map_err(|e| {
+        SiaError::new(format!(
+            "failed to create feedback generation directory {}: {e}",
+            args.next_gen_dir
+        ))
+    })?;
     if let Some(r) = resolved_ref {
-        let _ = copy_reference_into(r, Path::new(args.next_gen_dir));
+        copy_reference_into(r, Path::new(args.next_gen_dir)).map_err(|e| {
+            SiaError::new(format!(
+                "failed to copy agent reference into {}: {e}",
+                args.next_gen_dir
+            ))
+        })?;
     }
 
     let feedback_prompt_path = format!("{}/{}", args.next_gen_dir, names::FEEDBACK_PROMPT);
-    let _ = std::fs::write(&feedback_prompt_path, &feedback_prompt);
+    std::fs::write(&feedback_prompt_path, &feedback_prompt).map_err(|e| {
+        SiaError::new(format!(
+            "failed to write feedback prompt to {feedback_prompt_path}: {e}"
+        ))
+    })?;
 
     crate::agent_impls::run_agent(
         &meta_profile.model,
