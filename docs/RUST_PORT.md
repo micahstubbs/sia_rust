@@ -75,6 +75,22 @@ argparse → `clap`; FastAPI/uvicorn → `axum`/`tokio`; `subprocess` → `std::
 `importlib.resources` package-data → `include_dir` (bundled provider/profile JSON
 and the web `index.html` are embedded at build time).
 
+## Security & sandboxing
+
+SIA runs self-modifying agents, so the execution sandbox is a first-class concern.
+The formal threat model — assets, the orchestrator / native-runner-tools / Python
+target-subprocess trust boundaries, escalation paths (filesystem escape, network
+exfiltration, resource exhaustion, prompt-injection-driven tool abuse), current
+mitigations, and the roadmap to OS-level enforcement (capability allow-list →
+landlock/seccomp → WASI) — lives in [`SECURITY.md`](../SECURITY.md).
+
+The first concrete hardening primitive is `src/sandbox.rs` (`pub mod sandbox`, on
+the **default** build): a pure-`std` **capability allow-list**
+(`Capabilities` + `check_read`/`check_write`/`check_bash`/`check_within_root`/
+`check_size`) that native tool executors can consult before acting, with
+deny-by-default and `permissive`/`read_only` presets. It is the single auditable
+enforcement point the landlock/WASI roadmap builds on.
+
 ## Meta/feedback runners — native vs. the old boundary
 
 The meta/feedback agent runners (`claude` / `openhands` / `pydantic-ai`) originally
