@@ -213,3 +213,6 @@ task_1/public/data
 
 data
 runs
+
+# Claude Code agent worktrees / local state
+.claude/
