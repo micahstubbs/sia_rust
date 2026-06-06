@@ -47,6 +47,20 @@ fn make_runs_root() -> (tempfile::TempDir, std::path::PathBuf) {
     )
     .unwrap();
     std::fs::write(gen2.join("improvement.md"), "# Plan\n- do better\n").unwrap();
+    // gen_1 carries telemetry; gen_2 does not (exercises graceful degradation).
+    std::fs::write(
+        gen1.join("telemetry.json"),
+        json!({
+            "generations": [
+                {"generation": 1, "input_tokens": 100, "output_tokens": 20,
+                 "num_api_calls": 2, "num_tool_calls": 1, "duration_ms": 500}
+            ],
+            "cumulative": {"generation": 1, "input_tokens": 100, "output_tokens": 20,
+                 "num_api_calls": 2, "num_tool_calls": 1, "duration_ms": 500}
+        })
+        .to_string(),
+    )
+    .unwrap();
     (d, root)
 }
 
@@ -90,4 +104,46 @@ async fn test_api_endpoints() {
 
     let (status, _body) = get(&app, "/").await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_telemetry_and_metrics_endpoints() {
+    let (_d, root) = make_runs_root();
+    let app = sia::web::create_app(root);
+
+    // Per-generation telemetry (present).
+    let (status, body) = get(&app, "/api/runs/run_7/gens/gen_1/telemetry").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["cumulative"]["input_tokens"], json!(100));
+
+    // Per-generation telemetry (absent) -> 404.
+    let (status, _body) = get(&app, "/api/runs/run_7/gens/gen_2/telemetry").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Run-level telemetry folds the single telemetry-bearing generation.
+    let (status, body) = get(&app, "/api/runs/run_7/telemetry").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["generations"].as_array().unwrap().len(), 1);
+    assert_eq!(v["cumulative"]["output_tokens"], json!(20));
+    assert_eq!(v["cumulative"]["num_tool_calls"], json!(1));
+
+    // Metrics summary: score per gen + tokens where telemetry exists.
+    let (status, body) = get(&app, "/api/runs/run_7/metrics").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: Value = serde_json::from_str(&body).unwrap();
+    let gens = v["generations"].as_array().unwrap();
+    assert_eq!(gens.len(), 2);
+    assert_eq!(gens[0]["score"], json!(50.0));
+    assert_eq!(gens[0]["total_tokens"], json!(120));
+    // gen_2 has eval-less / telemetry-less => score null, no token fields.
+    assert!(gens[1].get("input_tokens").is_none());
+    assert_eq!(v["totals"]["total_tokens"], json!(120));
+
+    // Unknown run -> 404 on both new endpoints.
+    let (status, _b) = get(&app, "/api/runs/run_404/metrics").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _b) = get(&app, "/api/runs/run_404/telemetry").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

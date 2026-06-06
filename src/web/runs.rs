@@ -600,6 +600,200 @@ pub fn get_openhands_events(
 }
 
 // --------------------------------------------------------------------------- //
+// Telemetry + metrics (issue #63)
+// --------------------------------------------------------------------------- //
+
+/// Filename written by the `llm` telemetry layer (mirrors
+/// [`crate::llm::telemetry::TELEMETRY_JSON`]); duplicated here as a `&str` so the
+/// web data layer reads it without depending on the optional `llm` feature.
+const TELEMETRY_FILENAME: &str = "telemetry.json";
+
+/// Raw `<gen>/telemetry.json` for one generation, if present.
+///
+/// Returns the parsed `{ generations: [...], cumulative: {...} }` object the
+/// `llm` telemetry layer writes (issue #64). Mirrors `get_openhands_events`'s
+/// path safety: the run/gen names are resolved through `resolve_gen`, which
+/// refuses traversal and non-matching directory names.
+pub fn get_generation_telemetry(runs_root: &Path, run_name: &str, gen_name: &str) -> Option<Value> {
+    let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
+    let data = read_json(&gen_dir.join(TELEMETRY_FILENAME))?;
+    data.is_object().then_some(data)
+}
+
+/// Pull `{input, output}` token totals from a generation's `telemetry.json`.
+///
+/// Prefers the `cumulative` block (sum across the generation's API calls), but
+/// falls back to summing the `generations` array so a telemetry file written in
+/// either shape still yields totals. Returns `None` when the file is absent or
+/// carries no token fields, so the caller can omit token columns entirely.
+fn telemetry_tokens(gen_dir: &Path) -> Option<(u64, u64)> {
+    let data = read_json(&gen_dir.join(TELEMETRY_FILENAME))?;
+    let token_pair = |v: &Value| -> Option<(u64, u64)> {
+        let obj = v.as_object()?;
+        let input = obj.get("input_tokens").and_then(|n| n.as_u64());
+        let output = obj.get("output_tokens").and_then(|n| n.as_u64());
+        match (input, output) {
+            (None, None) => None,
+            (i, o) => Some((i.unwrap_or(0), o.unwrap_or(0))),
+        }
+    };
+
+    if let Some(pair) = data.get("cumulative").and_then(token_pair) {
+        return Some(pair);
+    }
+    if let Some(gens) = data.get("generations").and_then(|v| v.as_array()) {
+        let mut input = 0u64;
+        let mut output = 0u64;
+        let mut seen = false;
+        for entry in gens {
+            if let Some((i, o)) = token_pair(entry) {
+                input += i;
+                output += o;
+                seen = true;
+            }
+        }
+        if seen {
+            return Some((input, output));
+        }
+    }
+    token_pair(&data)
+}
+
+/// Add the telemetry counter fields of `src` into `dst` (accumulating object).
+fn accumulate_telemetry(dst: &mut serde_json::Map<String, Value>, src: &Value) {
+    const FIELDS: &[&str] = &[
+        "input_tokens",
+        "output_tokens",
+        "num_api_calls",
+        "num_tool_calls",
+        "duration_ms",
+    ];
+    let obj = match src.as_object() {
+        Some(o) => o,
+        None => return,
+    };
+    for field in FIELDS {
+        if let Some(n) = obj.get(*field).and_then(|v| v.as_u64()) {
+            let entry = dst
+                .entry((*field).to_string())
+                .or_insert_with(|| Value::from(0u64));
+            let current = entry.as_u64().unwrap_or(0);
+            *entry = Value::from(current + n);
+        }
+    }
+}
+
+/// Run-level telemetry: per-generation entries plus a cumulative summary.
+///
+/// Reads each `gen_<n>/telemetry.json` (via [`get_generation_telemetry`]) and
+/// folds them into a single `{ generations: [...], cumulative: {...} }` object —
+/// the same shape the `llm` telemetry layer writes per generation, so the
+/// frontend telemetry panel consumes one endpoint. Each generation's
+/// `cumulative` block (or, lacking one, its own object) becomes a row tagged
+/// with its `generation` index. Returns `None` only when the run does not exist;
+/// a run with no telemetry yields empty `generations` and a zeroed
+/// `cumulative`, letting the UI show a clean "no telemetry yet" state.
+pub fn get_run_telemetry(runs_root: &Path, run_name: &str) -> Option<Value> {
+    let run_dir = safe_child(runs_root, run_name)?;
+    run_dir_index(run_name)?;
+    if !run_dir.is_dir() {
+        return None;
+    }
+
+    let mut generations: Vec<Value> = Vec::new();
+    let mut cumulative = serde_json::Map::new();
+    for (gen_index, gen_dir) in gen_dirs(&run_dir) {
+        let data = match read_json(&gen_dir.join(TELEMETRY_FILENAME)) {
+            Some(d) if d.is_object() => d,
+            _ => continue,
+        };
+        // Prefer the per-gen `cumulative` block; fall back to the whole object.
+        let summary = data.get("cumulative").cloned().unwrap_or(data);
+        accumulate_telemetry(&mut cumulative, &summary);
+        if let Some(obj) = summary.as_object() {
+            let mut row = obj.clone();
+            row.insert("generation".into(), Value::from(gen_index));
+            generations.push(Value::Object(row));
+        }
+    }
+    cumulative.insert("generation".into(), Value::from(generations.len()));
+
+    Some(serde_json::json!({
+        "run": run_name,
+        "generations": generations,
+        "cumulative": Value::Object(cumulative),
+    }))
+}
+
+/// Compact per-generation series for charting score and token usage.
+///
+/// For every `gen_<n>` directory under the run (in index order) emits
+/// `{generation, score, input_tokens?, output_tokens?, total_tokens?}` where
+/// `score` is the eval accuracy percent (reusing [`eval_summary`]) and the token
+/// fields come from that generation's `telemetry.json`. Token fields are omitted
+/// when no telemetry is present, so the series degrades gracefully. `totals`
+/// sums the token columns across generations and carries the best score.
+///
+/// Returns `None` only when the run directory does not exist.
+pub fn get_run_metrics_summary(runs_root: &Path, run_name: &str) -> Option<Value> {
+    let run_dir = safe_child(runs_root, run_name)?;
+    run_dir_index(run_name)?;
+    if !run_dir.is_dir() {
+        return None;
+    }
+
+    let mut generations: Vec<Value> = Vec::new();
+    let mut total_input = 0u64;
+    let mut total_output = 0u64;
+    let mut any_tokens = false;
+    let mut best_score: Option<f64> = None;
+
+    for (gen_index, gen_dir) in gen_dirs(&run_dir) {
+        let score = eval_summary(&gen_dir).and_then(|e| e.accuracy_percent);
+        if let Some(s) = score {
+            best_score = Some(best_score.map_or(s, |b: f64| b.max(s)));
+        }
+
+        let mut row = serde_json::Map::new();
+        row.insert("generation".into(), Value::from(gen_index));
+        row.insert(
+            "score".into(),
+            score.map(Value::from).unwrap_or(Value::Null),
+        );
+        if let Some((input, output)) = telemetry_tokens(&gen_dir) {
+            any_tokens = true;
+            total_input += input;
+            total_output += output;
+            row.insert("input_tokens".into(), Value::from(input));
+            row.insert("output_tokens".into(), Value::from(output));
+            row.insert("total_tokens".into(), Value::from(input + output));
+        }
+        generations.push(Value::Object(row));
+    }
+
+    let mut totals = serde_json::Map::new();
+    totals.insert("num_generations".into(), Value::from(generations.len()));
+    totals.insert(
+        "best_score".into(),
+        best_score.map(Value::from).unwrap_or(Value::Null),
+    );
+    if any_tokens {
+        totals.insert("input_tokens".into(), Value::from(total_input));
+        totals.insert("output_tokens".into(), Value::from(total_output));
+        totals.insert(
+            "total_tokens".into(),
+            Value::from(total_input + total_output),
+        );
+    }
+
+    Some(serde_json::json!({
+        "run": run_name,
+        "generations": generations,
+        "totals": Value::Object(totals),
+    }))
+}
+
+// --------------------------------------------------------------------------- //
 // Path safety
 // --------------------------------------------------------------------------- //
 fn safe_child(parent: &Path, name: &str) -> Option<PathBuf> {
@@ -639,4 +833,193 @@ pub fn resolve_gen(runs_root: &Path, run_name: &str, gen_name: &str) -> Option<P
 
 fn as_int(value: Option<&String>) -> Option<i64> {
     value.and_then(|s| s.parse().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Build `runs/run_3/gen_1` with an eval results file. Optionally write a
+    /// `telemetry.json` into the gen dir. Returns the tempdir (kept alive by the
+    /// caller) and the runs root path.
+    fn make_run(with_telemetry: bool) -> (tempfile::TempDir, PathBuf) {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("runs");
+        let gen1 = root.join("run_3").join("gen_1");
+        let gen2 = root.join("run_3").join("gen_2");
+        std::fs::create_dir_all(&gen1).unwrap();
+        std::fs::create_dir_all(&gen2).unwrap();
+
+        std::fs::write(
+            gen1.join("evaluation_results.json"),
+            json!({"total_questions": 4, "correct": 1, "accuracy_percent": 25.0}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            gen2.join("evaluation_results.json"),
+            json!({"total_questions": 4, "correct": 3, "accuracy_percent": 75.0}).to_string(),
+        )
+        .unwrap();
+
+        if with_telemetry {
+            std::fs::write(
+                gen1.join("telemetry.json"),
+                json!({
+                    "generations": [
+                        {"generation": 1, "input_tokens": 100, "output_tokens": 20,
+                         "num_api_calls": 1, "num_tool_calls": 0, "duration_ms": 500}
+                    ],
+                    "cumulative": {"generation": 1, "input_tokens": 100, "output_tokens": 20,
+                         "num_api_calls": 1, "num_tool_calls": 0, "duration_ms": 500}
+                })
+                .to_string(),
+            )
+            .unwrap();
+            std::fs::write(
+                gen2.join("telemetry.json"),
+                json!({
+                    "generations": [
+                        {"generation": 2, "input_tokens": 200, "output_tokens": 50,
+                         "num_api_calls": 3, "num_tool_calls": 2, "duration_ms": 700}
+                    ],
+                    "cumulative": {"generation": 2, "input_tokens": 200, "output_tokens": 50,
+                         "num_api_calls": 3, "num_tool_calls": 2, "duration_ms": 700}
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        (d, root)
+    }
+
+    #[test]
+    fn telemetry_reads_present_file_and_is_traversal_safe() {
+        let (_d, root) = make_run(true);
+        let v = get_generation_telemetry(&root, "run_3", "gen_1").expect("telemetry present");
+        assert_eq!(v["cumulative"]["input_tokens"], json!(100));
+        assert_eq!(v["generations"][0]["output_tokens"], json!(20));
+
+        // Absent file -> None.
+        let (_d2, root2) = make_run(false);
+        assert!(get_generation_telemetry(&root2, "run_3", "gen_1").is_none());
+
+        // Traversal / bad names are refused.
+        assert!(get_generation_telemetry(&root, "run_3", "..").is_none());
+        assert!(get_generation_telemetry(&root, "..", "gen_1").is_none());
+        assert!(get_generation_telemetry(&root, "run_3", "gen_999").is_none());
+    }
+
+    #[test]
+    fn metrics_summary_includes_tokens_when_telemetry_present() {
+        let (_d, root) = make_run(true);
+        let v = get_run_metrics_summary(&root, "run_3").expect("run exists");
+        assert_eq!(v["run"], json!("run_3"));
+
+        let gens = v["generations"].as_array().unwrap();
+        assert_eq!(gens.len(), 2);
+
+        // gen 1: score 25%, tokens 100/20/120.
+        assert_eq!(gens[0]["generation"], json!(1));
+        assert_eq!(gens[0]["score"], json!(25.0));
+        assert_eq!(gens[0]["input_tokens"], json!(100));
+        assert_eq!(gens[0]["output_tokens"], json!(20));
+        assert_eq!(gens[0]["total_tokens"], json!(120));
+
+        // gen 2: score 75%, tokens 200/50/250.
+        assert_eq!(gens[1]["score"], json!(75.0));
+        assert_eq!(gens[1]["total_tokens"], json!(250));
+
+        // Totals aggregate tokens and carry the best score.
+        assert_eq!(v["totals"]["num_generations"], json!(2));
+        assert_eq!(v["totals"]["best_score"], json!(75.0));
+        assert_eq!(v["totals"]["input_tokens"], json!(300));
+        assert_eq!(v["totals"]["output_tokens"], json!(70));
+        assert_eq!(v["totals"]["total_tokens"], json!(370));
+    }
+
+    #[test]
+    fn metrics_summary_degrades_without_telemetry() {
+        let (_d, root) = make_run(false);
+        let v = get_run_metrics_summary(&root, "run_3").expect("run exists");
+
+        let gens = v["generations"].as_array().unwrap();
+        assert_eq!(gens.len(), 2);
+        // Score still present from eval results...
+        assert_eq!(gens[0]["score"], json!(25.0));
+        // ...but token fields are omitted entirely.
+        assert!(gens[0].get("input_tokens").is_none());
+        assert!(gens[0].get("total_tokens").is_none());
+
+        // Totals carry the best score but no token keys.
+        assert_eq!(v["totals"]["best_score"], json!(75.0));
+        assert!(v["totals"].get("input_tokens").is_none());
+        assert!(v["totals"].get("total_tokens").is_none());
+    }
+
+    #[test]
+    fn metrics_summary_missing_run_is_none() {
+        let (_d, root) = make_run(true);
+        assert!(get_run_metrics_summary(&root, "run_999").is_none());
+        // Non-run-shaped names are refused.
+        assert!(get_run_metrics_summary(&root, "..").is_none());
+        assert!(get_run_metrics_summary(&root, "not_a_run").is_none());
+    }
+
+    #[test]
+    fn run_telemetry_folds_generations_into_cumulative() {
+        let (_d, root) = make_run(true);
+        let v = get_run_telemetry(&root, "run_3").expect("run exists");
+        assert_eq!(v["run"], json!("run_3"));
+
+        let gens = v["generations"].as_array().unwrap();
+        assert_eq!(gens.len(), 2);
+        assert_eq!(gens[0]["generation"], json!(1));
+        assert_eq!(gens[0]["input_tokens"], json!(100));
+        assert_eq!(gens[1]["generation"], json!(2));
+
+        // Cumulative sums every counter across both generations.
+        let c = &v["cumulative"];
+        assert_eq!(c["input_tokens"], json!(300));
+        assert_eq!(c["output_tokens"], json!(70));
+        assert_eq!(c["num_api_calls"], json!(4));
+        assert_eq!(c["num_tool_calls"], json!(2));
+        assert_eq!(c["duration_ms"], json!(1200));
+        assert_eq!(c["generation"], json!(2));
+    }
+
+    #[test]
+    fn run_telemetry_empty_when_no_files() {
+        let (_d, root) = make_run(false);
+        let v = get_run_telemetry(&root, "run_3").expect("run exists");
+        assert_eq!(v["generations"].as_array().unwrap().len(), 0);
+        // Zeroed cumulative: only the generation count is set.
+        assert_eq!(v["cumulative"]["generation"], json!(0));
+        assert!(v["cumulative"].get("input_tokens").is_none());
+
+        assert!(get_run_telemetry(&root, "run_999").is_none());
+    }
+
+    #[test]
+    fn telemetry_tokens_falls_back_to_generations_sum() {
+        // A telemetry.json with no `cumulative` block still yields summed tokens.
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("runs");
+        let gen = root.join("run_5").join("gen_1");
+        std::fs::create_dir_all(&gen).unwrap();
+        std::fs::write(
+            gen.join("telemetry.json"),
+            json!({"generations": [
+                {"input_tokens": 10, "output_tokens": 1},
+                {"input_tokens": 5, "output_tokens": 2}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+
+        let v = get_run_metrics_summary(&root, "run_5").unwrap();
+        assert_eq!(v["generations"][0]["input_tokens"], json!(15));
+        assert_eq!(v["generations"][0]["output_tokens"], json!(3));
+        assert_eq!(v["generations"][0]["total_tokens"], json!(18));
+    }
 }

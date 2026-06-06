@@ -3,14 +3,22 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SIA Runs Visualizer</title>
+<title>SIA Studio</title>
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --panel-2: #1d212b; --border: #272c38;
     --text: #e6e9ef; --muted: #8b93a7; --accent: #6ea8fe; --good: #4ade80;
     --bad: #f87171; --warn: #fbbf24; --code-bg: #11141a;
+    --grid: #272c38; --token-in: #6ea8fe; --token-out: #c792ea;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  /* Light theme: same variable names, persisted via localStorage on <html>. */
+  html[data-theme="light"] {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #eef1f6; --border: #d7dce5;
+    --text: #1b1f29; --muted: #5b6473; --accent: #2563eb; --good: #16a34a;
+    --bad: #dc2626; --warn: #b45309; --code-bg: #f0f2f6;
+    --grid: #d7dce5; --token-in: #2563eb; --token-out: #7c3aed;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
@@ -124,12 +132,38 @@
     border-radius: 8px; padding: 6px 10px; font-family: var(--sans); font-size: 13px; }
   .crumbs { color: var(--muted); margin-bottom: 6px; font-size: 13px; }
   .spinner { color: var(--muted); padding: 30px; }
+  /* Brand bar: title on the left, theme toggle pinned right. */
+  .brand { justify-content: space-between; }
+  .brand-left { display: flex; align-items: center; gap: 10px; }
+  .theme-toggle { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 14px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; }
+  .theme-toggle:hover { border-color: var(--accent); }
+  .section-head { display: flex; align-items: baseline; gap: 10px; margin: 26px 0 6px; }
+  .section-head h2 { margin: 0; }
+  .section-head .hint { color: var(--muted); font-size: 12px; }
+  /* Telemetry stat cards. */
+  .tele-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr));
+    gap: 10px; margin: 10px 0 8px; }
+  .tele-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; }
+  .tele-card .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+  .tele-card .v { margin-top: 6px; font-family: var(--mono); font-size: 20px; font-weight: 600; }
+  .tele-card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  /* Chart legend chips. */
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 4px 0 10px; font-size: 12px;
+    color: var(--muted); }
+  .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 5px; vertical-align: middle; }
 </style>
 </head>
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="brand"><span class="dot"></span><h1>SIA RUNS</h1></div>
+    <div class="brand">
+      <div class="brand-left"><span class="dot"></span><h1>SIA STUDIO</h1></div>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle dark / light mode" aria-label="Toggle theme">◐</button>
+    </div>
     <div class="runlist" id="runlist"><div class="spinner">Loading…</div></div>
   </aside>
   <main class="main" id="main"><div class="empty">Select a run from the left.</div></main>
@@ -160,6 +194,32 @@ const api = async (path) => {
 const fmtPct = (p) => p == null ? "—" : p.toFixed(1) + "%";
 const pctClass = (p) => p == null ? "" : p >= 50 ? "good" : p >= 25 ? "warn" : "bad";
 const esc = (s) => (s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const fmtInt = (n) => n == null ? "—" : Number(n).toLocaleString();
+const fmtDuration = (ms) => {
+  if (ms == null) return "—";
+  if (ms < 1000) return ms + " ms";
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + " s";
+  const m = Math.floor(s / 60); return `${m}m ${Math.round(s % 60)}s`;
+};
+
+// ---- Dark / light theme (CSS-only, persisted) -------------------------------
+const THEME_KEY = "sia-studio-theme";
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = $("#themeToggle");
+  if (btn) btn.textContent = theme === "light" ? "☀" : "☾";
+}
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY) || "dark";
+  applyTheme(saved);
+  const btn = $("#themeToggle");
+  if (btn) btn.addEventListener("click", () => {
+    const next = (document.documentElement.getAttribute("data-theme") === "light") ? "dark" : "light";
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+  });
+}
 
 // Minimal, safe markdown (headings, bold, inline code, lists, hr, code fences).
 function md(src) {
@@ -238,6 +298,7 @@ function highlightPython(code) {
 // ---- Routing (hash) ---------------------------------------------------------
 let RUNS = [];
 async function boot() {
+  initTheme();
   try {
     RUNS = await api("/api/runs");
   } catch (e) { $("#runlist").innerHTML = `<div class="empty">Failed to load runs.<br>${esc(e.message)}</div>`; return; }
@@ -358,11 +419,167 @@ function renderRun(run) {
 
   main.append(profileChips(run));
 
-  main.append(genChart(run.generations));
+  // Self-improvement section: live performance + telemetry, fetched lazily so
+  // the run chrome paints immediately and degrades gracefully on error.
+  main.append(h("div", { class: "section-head" },
+    h("h2", {}, "Self-improvement"),
+    h("span", { class: "hint" }, "score & token usage across generations")));
+
+  const telePanel = h("div", {});
+  main.append(telePanel);
+  loadTelemetryPanel(run.name, telePanel);
+
+  const metricsHost = h("div", { class: "gen-chart" },
+    h("div", { class: "k muted" }, "PERFORMANCE VS GENERATION"),
+    h("div", { class: "spinner" }, "Loading metrics…"));
+  main.append(metricsHost);
+  loadMetricsChart(run.name, metricsHost, run.generations);
 
   VIEW.pillsRow = h("div", { class: "pill-row" });
   VIEW.genHost = h("div", {});
   main.append(VIEW.pillsRow, VIEW.genHost);
+}
+
+// ---- Telemetry panel: cumulative tokens / calls / duration ------------------
+async function loadTelemetryPanel(runName, host) {
+  let tele;
+  try { tele = await api(`/api/runs/${runName}/telemetry`); }
+  catch { host.innerHTML = ""; return; }
+  const c = tele && tele.cumulative ? tele.cumulative : {};
+  const hasData = (tele.generations || []).length > 0 &&
+    ((c.input_tokens || 0) + (c.output_tokens || 0) + (c.num_api_calls || 0) + (c.num_tool_calls || 0)) > 0;
+  host.innerHTML = "";
+  if (!hasData) {
+    host.append(h("div", { class: "tele-card", style: "margin:8px 0 4px" },
+      h("div", { class: "k" }, "Telemetry"),
+      h("div", { class: "sub", style: "margin-top:6px;font-size:13px" },
+        "No telemetry yet — token usage appears here once a generation runs with the native LLM client.")));
+    return;
+  }
+  const totalTokens = (c.input_tokens || 0) + (c.output_tokens || 0);
+  const cards = [
+    ["Total tokens", fmtInt(totalTokens), `${fmtInt(c.input_tokens)} in · ${fmtInt(c.output_tokens)} out`],
+    ["API calls", fmtInt(c.num_api_calls), "model turns"],
+    ["Tool calls", fmtInt(c.num_tool_calls), "actions taken"],
+    ["Duration", fmtDuration(c.duration_ms), `across ${fmtInt(c.generation)} gen`],
+  ];
+  host.append(h("div", { class: "tele-grid" }, cards.map(([k, v, sub]) =>
+    h("div", { class: "tele-card" },
+      h("div", { class: "k" }, k),
+      h("div", { class: "v" }, v),
+      h("div", { class: "sub" }, sub)))));
+}
+
+// ---- Performance-vs-generation chart (score line + token bars) --------------
+async function loadMetricsChart(runName, host, fallbackGens) {
+  let metrics;
+  try { metrics = await api(`/api/runs/${runName}/metrics`); }
+  catch {
+    host.innerHTML = "";
+    host.append(h("div", { class: "k muted" }, "ACCURACY ACROSS GENERATIONS"), genChart(fallbackGens));
+    return;
+  }
+  host.innerHTML = "";
+  host.append(h("div", { class: "k muted" }, "PERFORMANCE VS GENERATION"));
+  host.append(metricsChart(metrics.generations || []));
+}
+
+// Dependency-free <canvas> chart: token usage as stacked bars (input + output)
+// on a right axis, accuracy as a line+points on a left axis. Redraws on resize
+// and theme change by reading CSS custom properties at paint time.
+function metricsChart(series) {
+  const valid = (series || []).filter(g => g != null);
+  if (!valid.length) return h("div", { class: "muted" }, "No metrics yet.");
+  const hasTokens = valid.some(g => g.total_tokens != null);
+
+  const wrap = h("div", {});
+  const legend = h("div", { class: "legend" },
+    h("span", {}, h("span", { class: "swatch", style: "background:var(--accent)" }), "Score (%)"));
+  if (hasTokens) {
+    legend.append(h("span", {}, h("span", { class: "swatch", style: "background:var(--token-in)" }), "Input tokens"));
+    legend.append(h("span", {}, h("span", { class: "swatch", style: "background:var(--token-out)" }), "Output tokens"));
+  }
+  wrap.append(legend);
+
+  const canvas = h("canvas", { style: "width:100%;height:200px;display:block" });
+  wrap.append(canvas);
+
+  const draw = () => {
+    if (!canvas.isConnected) return;  // canvas swapped out by navigation
+    const cs = getComputedStyle(document.documentElement);
+    const col = (name, fb) => (cs.getPropertyValue(name).trim() || fb);
+    const C = {
+      text: col("--text", "#e6e9ef"), muted: col("--muted", "#8b93a7"),
+      grid: col("--grid", "#272c38"), accent: col("--accent", "#6ea8fe"),
+      tin: col("--token-in", "#6ea8fe"), tout: col("--token-out", "#c792ea"),
+    };
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.clientWidth || 640, H = 200;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const padL = 38, padR = hasTokens ? 48 : 16, padT = 14, padB = 26;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const n = valid.length;
+    const maxTok = Math.max(1, ...valid.map(g => g.total_tokens || 0));
+    const slot = plotW / n;
+    const barW = Math.min(40, slot * 0.5);
+
+    // gridlines + score axis labels (0,50,100)
+    ctx.strokeStyle = C.grid; ctx.fillStyle = C.muted; ctx.lineWidth = 1;
+    ctx.font = "11px " + cs.getPropertyValue("--mono");
+    [0, 50, 100].forEach(p => {
+      const y = padT + plotH - (p / 100) * plotH;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+      ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(p + "%", padL - 6, y);
+    });
+
+    // stacked token bars (input bottom, output top)
+    if (hasTokens) {
+      valid.forEach((g, i) => {
+        const cx = padL + slot * (i + 0.5);
+        const inTok = g.input_tokens || 0, outTok = g.output_tokens || 0;
+        const hIn = (inTok / maxTok) * plotH, hOut = (outTok / maxTok) * plotH;
+        const x = cx - barW / 2, base = padT + plotH;
+        ctx.fillStyle = C.tin; ctx.fillRect(x, base - hIn, barW, hIn);
+        ctx.fillStyle = C.tout; ctx.fillRect(x, base - hIn - hOut, barW, hOut);
+      });
+      // right axis label
+      ctx.fillStyle = C.muted; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText(fmtInt(maxTok), W - padR + 4, padT);
+      ctx.textBaseline = "bottom";
+      ctx.fillText("tok", W - padR + 4, padT + plotH);
+    }
+
+    // score line + points
+    const sx = (i) => padL + slot * (i + 0.5);
+    const sy = (s) => padT + plotH - (Math.max(0, Math.min(100, s)) / 100) * plotH;
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.beginPath();
+    let started = false;
+    valid.forEach((g, i) => {
+      if (g.score == null) { started = false; return; }
+      const x = sx(i), y = sy(g.score);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    valid.forEach((g, i) => {
+      const x = sx(i);
+      if (g.score != null) {
+        ctx.fillStyle = C.accent; ctx.beginPath(); ctx.arc(x, sy(g.score), 4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = C.text; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        ctx.fillText(g.score.toFixed(0) + "%", x, sy(g.score) - 7);
+      }
+      ctx.fillStyle = C.muted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText("gen " + g.generation, x, padT + plotH + 6);
+    });
+  };
+
+  // Draw once mounted, and again on resize / theme toggle.
+  requestAnimationFrame(draw);
+  const ro = new ResizeObserver(draw); ro.observe(canvas);
+  const tbtn = $("#themeToggle"); if (tbtn) tbtn.addEventListener("click", () => requestAnimationFrame(draw));
+  return wrap;
 }
 
 // ---- Generation mount: only re-render the bits that changed ------------------

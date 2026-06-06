@@ -48,6 +48,12 @@ pub fn create_app(runs_dir: impl Into<PathBuf>) -> Router {
             "/api/runs/:run_name/gens/:gen_name/openhands/:session",
             get(api_openhands_events),
         )
+        .route(
+            "/api/runs/:run_name/gens/:gen_name/telemetry",
+            get(api_gen_telemetry),
+        )
+        .route("/api/runs/:run_name/telemetry", get(api_run_telemetry))
+        .route("/api/runs/:run_name/metrics", get(api_run_metrics))
         .route("/", get(index))
         .with_state(state)
 }
@@ -110,6 +116,30 @@ async fn api_openhands_events(
     match runs_data::get_openhands_events(&root, &run_name, &gen_name, &session) {
         Some(events) => Json(events).into_response(),
         None => not_found("Session not found"),
+    }
+}
+
+async fn api_gen_telemetry(
+    State(root): State<AppState>,
+    Path((run_name, gen_name)): Path<(String, String)>,
+) -> Response {
+    match runs_data::get_generation_telemetry(&root, &run_name, &gen_name) {
+        Some(telemetry) => Json(telemetry).into_response(),
+        None => not_found("No telemetry found"),
+    }
+}
+
+async fn api_run_telemetry(State(root): State<AppState>, Path(run_name): Path<String>) -> Response {
+    match runs_data::get_run_telemetry(&root, &run_name) {
+        Some(telemetry) => Json(telemetry).into_response(),
+        None => not_found(&format!("Run not found: {run_name}")),
+    }
+}
+
+async fn api_run_metrics(State(root): State<AppState>, Path(run_name): Path<String>) -> Response {
+    match runs_data::get_run_metrics_summary(&root, &run_name) {
+        Some(metrics) => Json(metrics).into_response(),
+        None => not_found(&format!("Run not found: {run_name}")),
     }
 }
 
