@@ -51,3 +51,27 @@ Append-only debugging and process lessons for this project.
 **Solution**: Tested each supplied Nebius identifier as an `Authorization: Bearer` value against the Token Factory `/v1/models` endpoint without logging token values. All candidates returned HTTP 401, so the provisioning issue stayed open and a Resend email requested a generated API key from the Token Factory API keys section.
 
 **Prevention**: For future provider-secret audits, record both the expected env var and the credential issuance path. If users provide IDs instead of a key, test them with a short, secret-free request and keep the issue open until the provider accepts the credential.
+
+## 2026-06-06T15:31 - Rebuild ignored Beads DB state after rebasing worktrees
+
+**Problem**: After rebasing a clean worktree onto a newer `origin/main`, `br sync --flush-only` tried to re-export stale local Beads records and noisy issue-id rewrites. The tracked `.beads/issues.jsonl` had moved forward, but the ignored `.beads/beads.db` still held pre-rebase local state.
+
+**Root Cause**: Git rebases update tracked JSONL, but ignored SQLite files in `.beads/` are not part of Git history. A worktree can therefore have current tracked files and stale local Beads database contents at the same time.
+
+**Lesson**: In a rebased or long-lived worktree, treat `.beads/issues.jsonl` as the Git-synced source of truth before creating or closing new issues. If `br` starts resurrecting stale records, reset the tracked export to the intended base and rebuild the ignored DB from JSONL.
+
+**Solution**: Restored `.beads/issues.jsonl` to the rebased `origin/main` state, ran `br sync --import-only --rebuild`, removed generated recovery backups from the disposable worktree, then recreated the single intended tracker issue before committing.
+
+**Prevention**: After rebasing a worktree that has local Beads activity, run `br sync --status` and inspect the next JSONL diff before staging. If the diff contains unrelated resurrected or renamed issues, rebuild the local DB from the tracked JSONL before continuing.
+
+## 2026-06-06T15:31 - Quote shell arguments that contain query strings under zsh
+
+**Problem**: GitHub API verification commands like `gh api repos/.../CONTRIBUTIONS.md?ref=main` failed with `zsh: no matches found` even though the remote file existed.
+
+**Root Cause**: zsh treats unquoted `?` as a filename glob metacharacter. With `nomatch` enabled, unmatched globs abort before `gh` receives the API path.
+
+**Lesson**: Any CLI argument containing `?`, `*`, `[`, or `]` should be quoted in zsh unless glob expansion is intended. This especially matters for URL/query-string arguments passed to `gh api`, `curl`, and transcript/file lookup commands.
+
+**Solution**: Re-ran the GitHub verification with the API path quoted: `gh api 'repos/OWNER/REPO/contents/PATH?ref=main' ...`.
+
+**Prevention**: Quote GitHub REST paths and URLs by default in shell commands. Prefer `find` over raw `ls pattern` globs when missing matches are expected or acceptable.
