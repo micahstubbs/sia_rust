@@ -28,6 +28,13 @@ fn print_welcome() {
 }
 
 fn main() {
+    // Load `.env` (if present) before anything reads credentials. Real env vars
+    // always win; this only fills gaps and never panics. See `sia::env_file`.
+    let loaded = sia::env_file::load_dotenv();
+    if loaded > 0 {
+        eprintln!("loaded {loaded} vars from .env");
+    }
+
     let env_config = Config::from_env();
     print_welcome();
 

@@ -11,6 +11,7 @@ pub mod closed_loop;
 pub mod config;
 pub mod config_files;
 pub mod context_manager;
+pub mod env_file;
 pub mod error;
 pub mod io_utils;
 pub mod layout;

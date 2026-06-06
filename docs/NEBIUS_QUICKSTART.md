@@ -55,6 +55,11 @@ If you also want the default meta-agent (which uses Claude/Anthropic), add:
 export ANTHROPIC_API_KEY="your-anthropic-api-key-here"
 ```
 
+Instead of exporting keys each session you can put them in a `.env` file at the
+repo root (loaded at startup; real env vars still win, `.env` is gitignored).
+See [CREDENTIALS.md](CREDENTIALS.md) for the per-provider checklist and the
+`.env` format.
+
 ---
 
 ## 3. Run sia_rust against Nebius

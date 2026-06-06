@@ -73,6 +73,10 @@ cargo run -- --help              # CLI help (run / web sub-commands)
 
 To drive a real self-improvement loop, build with `--features llm` and set the
 provider credentials (e.g. `ANTHROPIC_API_KEY`, or a provider's `api_key_env`).
+You can export them in your shell or put them in a `.env` file (loaded at
+startup; real env vars win, `.env` is gitignored) — see
+**[docs/CREDENTIALS.md](docs/CREDENTIALS.md)** for the per-provider checklist and
+both options.
 
 ## Coming from the Python version
 
@@ -99,6 +103,7 @@ the native LLM-runner design, parity/benchmarks/evals, and testing seams.
 - [docs/RUST_PORT.md](docs/RUST_PORT.md) — Rust port architecture, module map, LLM runners, parity.
 - [docs/architecture.md](docs/architecture.md) — overall SIA architecture.
 - [docs/configuration.md](docs/configuration.md) — profiles, providers, config.
+- [docs/CREDENTIALS.md](docs/CREDENTIALS.md) — per-provider API keys + supplying them via shell or a `.env` file.
 - [docs/walkthrough.md](docs/walkthrough.md) — end-to-end walkthrough.
 - [docs/NEBIUS_QUICKSTART.md](docs/NEBIUS_QUICKSTART.md) — Nebius Token Factory quickstart (GPU credits + hosted models).
 - [docs/NEBIUS_MODELS.md](docs/NEBIUS_MODELS.md) — verifying Nebius model slugs against the live `/v1/models` catalog (script + `#[ignore]` test + per-profile verified status).
