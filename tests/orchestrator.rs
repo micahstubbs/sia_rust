@@ -20,8 +20,11 @@ fn tmp() -> tempfile::TempDir {
 #[test]
 fn test_load_single_trajectory() {
     let d = tmp();
-    std::fs::write(d.path().join("agent_execution.json"), json!([{"role": "user", "content": "hello"}]).to_string())
-        .unwrap();
+    std::fs::write(
+        d.path().join("agent_execution.json"),
+        json!([{"role": "user", "content": "hello"}]).to_string(),
+    )
+    .unwrap();
     let (data, is_multi) = load_agent_execution(d.path().to_str().unwrap(), &Config::default());
     assert!(!is_multi);
     assert!(data.is_array());
@@ -34,8 +37,11 @@ fn test_load_multi_trajectory() {
     let exec = d.path().join("agent_execution");
     std::fs::create_dir(&exec).unwrap();
     for i in 0..3 {
-        std::fs::write(exec.join(format!("execution_q{i}.json")), json!([{"role": "user", "content": format!("question {i}")}]).to_string())
-            .unwrap();
+        std::fs::write(
+            exec.join(format!("execution_q{i}.json")),
+            json!([{"role": "user", "content": format!("question {i}")}]).to_string(),
+        )
+        .unwrap();
     }
     let (data, is_multi) = load_agent_execution(d.path().to_str().unwrap(), &Config::default());
     assert!(is_multi);
@@ -83,7 +89,10 @@ fn test_empty_multi_folder_returns_exact_error() {
     std::fs::create_dir(d.path().join("agent_execution")).unwrap();
     let (data, is_multi) = load_agent_execution(d.path().to_str().unwrap(), &Config::default());
     assert!(is_multi);
-    assert_eq!(data, json!({"error": "Empty execution folder", "type": "multi-trajectory"}));
+    assert_eq!(
+        data,
+        json!({"error": "Empty execution folder", "type": "multi-trajectory"})
+    );
 }
 
 #[test]
@@ -104,8 +113,11 @@ fn test_multi_trajectory_shape() {
     let exec = d.path().join("agent_execution");
     std::fs::create_dir(&exec).unwrap();
     for i in 0..3 {
-        std::fs::write(exec.join(format!("execution_q{i}.json")), json!([{"role": "user", "content": format!("q{i}")}]).to_string())
-            .unwrap();
+        std::fs::write(
+            exec.join(format!("execution_q{i}.json")),
+            json!([{"role": "user", "content": format!("q{i}")}]).to_string(),
+        )
+        .unwrap();
     }
     let (data, is_multi) = load_agent_execution(d.path().to_str().unwrap(), &Config::default());
     assert!(is_multi);
@@ -123,9 +135,15 @@ fn test_multi_trajectory_shape() {
 #[test]
 fn test_load_agent_execution_honors_injected_max_size() {
     let d = tmp();
-    std::fs::write(d.path().join("agent_execution.json"), json!([{"role": "user", "content": "hi"}]).to_string())
-        .unwrap();
-    let cfg = Config { max_execution_log_size: 1, ..Config::default() };
+    std::fs::write(
+        d.path().join("agent_execution.json"),
+        json!([{"role": "user", "content": "hi"}]).to_string(),
+    )
+    .unwrap();
+    let cfg = Config {
+        max_execution_log_size: 1,
+        ..Config::default()
+    };
     let (data, is_multi) = load_agent_execution(d.path().to_str().unwrap(), &cfg);
     assert!(!is_multi);
     assert_eq!(data["error"], "File too large");
@@ -150,8 +168,18 @@ fn test_skipped_when_no_evaluate_py() {
     std::fs::create_dir(&gen_dir).unwrap();
     let task_dir = d.path().join("task");
     std::fs::create_dir(&task_dir).unwrap();
-    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed { returncode: 0, stdout: String::new(), stderr: String::new() };
-    let result = run_evaluation_with(&runner, gen_dir.to_str().unwrap(), task_dir.to_str().unwrap(), "/fake/venv", &Config::default());
+    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed {
+        returncode: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+    };
+    let result = run_evaluation_with(
+        &runner,
+        gen_dir.to_str().unwrap(),
+        task_dir.to_str().unwrap(),
+        "/fake/venv",
+        &Config::default(),
+    );
     assert_eq!(result["status"], "skipped");
 }
 
@@ -160,10 +188,24 @@ fn test_success_when_results_json_created() {
     let d = tmp();
     let gen_dir = d.path().join("gen_1");
     std::fs::create_dir(&gen_dir).unwrap();
-    std::fs::write(gen_dir.join("results.json"), json!({"accuracy": 0.9}).to_string()).unwrap();
+    std::fs::write(
+        gen_dir.join("results.json"),
+        json!({"accuracy": 0.9}).to_string(),
+    )
+    .unwrap();
     make_task_with_eval(&d.path().join("task"));
-    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed { returncode: 0, stdout: "ok".into(), stderr: String::new() };
-    let result = run_evaluation_with(&runner, gen_dir.to_str().unwrap(), d.path().join("task").to_str().unwrap(), "/fake/venv", &Config::default());
+    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed {
+        returncode: 0,
+        stdout: "ok".into(),
+        stderr: String::new(),
+    };
+    let result = run_evaluation_with(
+        &runner,
+        gen_dir.to_str().unwrap(),
+        d.path().join("task").to_str().unwrap(),
+        "/fake/venv",
+        &Config::default(),
+    );
     assert_eq!(result["status"], "success");
 }
 
@@ -173,8 +215,18 @@ fn test_error_on_nonzero_exit() {
     let gen_dir = d.path().join("gen_1");
     std::fs::create_dir(&gen_dir).unwrap();
     make_task_with_eval(&d.path().join("task"));
-    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed { returncode: 1, stdout: String::new(), stderr: "traceback".into() };
-    let result = run_evaluation_with(&runner, gen_dir.to_str().unwrap(), d.path().join("task").to_str().unwrap(), "/fake/venv", &Config::default());
+    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed {
+        returncode: 1,
+        stdout: String::new(),
+        stderr: "traceback".into(),
+    };
+    let result = run_evaluation_with(
+        &runner,
+        gen_dir.to_str().unwrap(),
+        d.path().join("task").to_str().unwrap(),
+        "/fake/venv",
+        &Config::default(),
+    );
     assert_eq!(result["status"], "error");
     assert!(result["reason"].as_str().unwrap().contains("code 1"));
 }
@@ -186,7 +238,13 @@ fn test_timeout_handled() {
     std::fs::create_dir(&gen_dir).unwrap();
     make_task_with_eval(&d.path().join("task"));
     let runner = |_cmd: &[String], _t: u64| EvalOutcome::TimedOut;
-    let result = run_evaluation_with(&runner, gen_dir.to_str().unwrap(), d.path().join("task").to_str().unwrap(), "/fake/venv", &Config::default());
+    let result = run_evaluation_with(
+        &runner,
+        gen_dir.to_str().unwrap(),
+        d.path().join("task").to_str().unwrap(),
+        "/fake/venv",
+        &Config::default(),
+    );
     assert_eq!(result["status"], "error");
     assert!(result["reason"].as_str().unwrap().contains("timed out"));
 }
@@ -197,8 +255,18 @@ fn test_warning_when_results_json_missing() {
     let gen_dir = d.path().join("gen_1");
     std::fs::create_dir(&gen_dir).unwrap();
     make_task_with_eval(&d.path().join("task"));
-    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed { returncode: 0, stdout: "done, no results written".into(), stderr: String::new() };
-    let result = run_evaluation_with(&runner, gen_dir.to_str().unwrap(), d.path().join("task").to_str().unwrap(), "/fake/venv", &Config::default());
+    let runner = |_cmd: &[String], _t: u64| EvalOutcome::Completed {
+        returncode: 0,
+        stdout: "done, no results written".into(),
+        stderr: String::new(),
+    };
+    let result = run_evaluation_with(
+        &runner,
+        gen_dir.to_str().unwrap(),
+        d.path().join("task").to_str().unwrap(),
+        "/fake/venv",
+        &Config::default(),
+    );
     assert_eq!(result["status"], "warning");
     assert_eq!(result["reason"], "results.json not created by evaluate.py");
 }
@@ -211,16 +279,33 @@ fn test_run_evaluation_honors_injected_timeout() {
     let pub_dir = d.path().join("task").join("data").join("public");
     std::fs::create_dir_all(&pub_dir).unwrap();
     std::fs::write(pub_dir.join("evaluate.py"), "pass").unwrap();
-    std::fs::write(gen_dir.join("results.json"), json!({"accuracy": 1.0}).to_string()).unwrap();
+    std::fs::write(
+        gen_dir.join("results.json"),
+        json!({"accuracy": 1.0}).to_string(),
+    )
+    .unwrap();
 
     let captured = Arc::new(Mutex::new(0u64));
     let cap = captured.clone();
     let runner = move |_cmd: &[String], t: u64| {
         *cap.lock().unwrap() = t;
-        EvalOutcome::Completed { returncode: 0, stdout: "ok".into(), stderr: String::new() }
+        EvalOutcome::Completed {
+            returncode: 0,
+            stdout: "ok".into(),
+            stderr: String::new(),
+        }
     };
-    let cfg = Config { eval_timeout: 123, ..Config::default() };
-    run_evaluation_with(&runner, gen_dir.to_str().unwrap(), d.path().join("task").to_str().unwrap(), "/fake/venv", &cfg);
+    let cfg = Config {
+        eval_timeout: 123,
+        ..Config::default()
+    };
+    run_evaluation_with(
+        &runner,
+        gen_dir.to_str().unwrap(),
+        d.path().join("task").to_str().unwrap(),
+        "/fake/venv",
+        &cfg,
+    );
     assert_eq!(*captured.lock().unwrap(), 123);
 }
 
@@ -243,7 +328,12 @@ fn test_docker_dataset_mounted_readonly() {
 #[test]
 fn test_docker_working_dir_mounted_readwrite() {
     let cmd = build_sandbox_cmd("/data", "/work", &Config::default());
-    let vol_indices: Vec<usize> = cmd.iter().enumerate().filter(|(_, x)| *x == "-v").map(|(i, _)| i).collect();
+    let vol_indices: Vec<usize> = cmd
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| *x == "-v")
+        .map(|(i, _)| i)
+        .collect();
     assert!(cmd[vol_indices[1] + 1].contains(":/work:rw"));
 }
 
@@ -261,7 +351,12 @@ fn test_docker_image_and_resource_limits() {
 
 #[test]
 fn test_sandbox_none_uses_standard_command() {
-    let cmd = build_target_cmd(&sia::layout::venv_python_path("/fake/venv"), "/tmp/gen/target_agent.py", "/data", "/tmp/gen");
+    let cmd = build_target_cmd(
+        &sia::layout::venv_python_path("/fake/venv"),
+        "/tmp/gen/target_agent.py",
+        "/data",
+        "/tmp/gen",
+    );
     assert_eq!(cmd[0], "/fake/venv/bin/python");
     assert!(!cmd[0].contains("docker"));
 }

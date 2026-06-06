@@ -54,7 +54,9 @@ pub fn abspath(path: &str) -> String {
     let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(p)
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(p)
     };
     normpath(&abs)
 }
@@ -138,10 +140,12 @@ pub fn resolve_task_dir(task: Option<&str>, task_dir: Option<&str>) -> SiaResult
     }
 
     if let Some(task_dir) = task_dir {
-        let resolved = std::fs::canonicalize(task_dir)
-            .unwrap_or_else(|_| PathBuf::from(abspath(task_dir)));
+        let resolved =
+            std::fs::canonicalize(task_dir).unwrap_or_else(|_| PathBuf::from(abspath(task_dir)));
         if !resolved.is_dir() {
-            return Err(SiaError::new(format!("Task directory does not exist: {task_dir}")));
+            return Err(SiaError::new(format!(
+                "Task directory does not exist: {task_dir}"
+            )));
         }
         let external_shared = resolved
             .parent()
@@ -151,7 +155,9 @@ pub fn resolve_task_dir(task: Option<&str>, task_dir: Option<&str>) -> SiaResult
         return Ok((resolved.display().to_string(), shared.display().to_string()));
     }
 
-    Err(SiaError::new("Either --task or --task_dir must be provided"))
+    Err(SiaError::new(
+        "Either --task or --task_dir must be provided",
+    ))
 }
 
 /// Paths under a run directory (e.g. `./runs/run_1`).
@@ -162,11 +168,15 @@ pub struct RunLayout {
 
 impl RunLayout {
     pub fn new(run_dir: impl Into<String>) -> Self {
-        RunLayout { run_dir: run_dir.into() }
+        RunLayout {
+            run_dir: run_dir.into(),
+        }
     }
 
     pub fn for_run_id(run_id: i64, runs_root: &str) -> Self {
-        RunLayout { run_dir: format!("{runs_root}/run_{run_id}") }
+        RunLayout {
+            run_dir: format!("{runs_root}/run_{run_id}"),
+        }
     }
 
     /// Absolute path to a generation directory.
@@ -221,7 +231,10 @@ pub struct TaskLayout {
 
 impl TaskLayout {
     pub fn new(task_dir: impl Into<String>, shared_dir: impl Into<String>) -> Self {
-        TaskLayout { task_dir: task_dir.into(), shared_dir: shared_dir.into() }
+        TaskLayout {
+            task_dir: task_dir.into(),
+            shared_dir: shared_dir.into(),
+        }
     }
 
     pub fn dataset_dir(&self) -> String {
@@ -263,7 +276,10 @@ mod tests {
 
     #[test]
     fn test_venv_paths() {
-        assert_eq!(venv_python_path("runs/run_1/venv"), "runs/run_1/venv/bin/python");
+        assert_eq!(
+            venv_python_path("runs/run_1/venv"),
+            "runs/run_1/venv/bin/python"
+        );
         assert_eq!(venv_pip_path("v"), "v/bin/pip");
     }
 
@@ -287,7 +303,10 @@ mod tests {
         let t = TaskLayout::new("/tasks/gpqa", "/shared");
         assert_eq!(t.dataset_dir(), "/tasks/gpqa/data/public");
         assert_eq!(t.task_md(), "/tasks/gpqa/data/public/task.md");
-        assert_eq!(t.reference_agent(), "/tasks/gpqa/reference/reference_target_agent.py");
+        assert_eq!(
+            t.reference_agent(),
+            "/tasks/gpqa/reference/reference_target_agent.py"
+        );
         assert_eq!(t.sample_execution(), "/shared/sample_agent_execution.json");
     }
 }

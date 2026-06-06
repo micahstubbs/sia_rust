@@ -7,7 +7,8 @@ use serde_json::json;
 use sia::context_manager::{ContextManager, GenData};
 
 const GEN1_AGENT: &str = "print('gen 1 agent')\n";
-const GEN2_AGENT: &str = "import sys\n\n\ndef main():\n    print('gen 2 agent, improved')\n\n\nmain()\n";
+const GEN2_AGENT: &str =
+    "import sys\n\n\ndef main():\n    print('gen 2 agent, improved')\n\n\nmain()\n";
 const IMPROVEMENT_MD: &str = "# Improvement Plan\n\n\
 - Added structured error handling so the agent recovers from tool failures gracefully.\n\
 - Switched to a retry loop with exponential backoff for transient API errors.\n\
@@ -25,10 +26,16 @@ fn test_context_md_golden() {
     std::fs::write(gen1.join("target_agent.py"), GEN1_AGENT).unwrap();
     std::fs::write(gen2.join("target_agent.py"), GEN2_AGENT).unwrap();
     std::fs::write(gen2.join("improvement.md"), IMPROVEMENT_MD).unwrap();
-    std::fs::write(gen1.join("results.json"), json!({"accuracy": 50.0, "correct": 99, "total": 198}).to_string())
-        .unwrap();
-    std::fs::write(gen2.join("results.json"), json!({"accuracy": 75.0, "correct": 148, "total": 198}).to_string())
-        .unwrap();
+    std::fs::write(
+        gen1.join("results.json"),
+        json!({"accuracy": 50.0, "correct": 99, "total": 198}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        gen2.join("results.json"),
+        json!({"accuracy": 75.0, "correct": 148, "total": 198}).to_string(),
+    )
+    .unwrap();
 
     let config = json!({
         "task_dir": "/tasks/example",
@@ -69,6 +76,7 @@ fn test_context_md_golden() {
     );
     cm.finalize();
 
-    let content = common::normalize_timestamps(&std::fs::read_to_string(run_dir.join("context.md")).unwrap());
+    let content =
+        common::normalize_timestamps(&std::fs::read_to_string(run_dir.join("context.md")).unwrap());
     common::assert_golden("context.md", &content);
 }

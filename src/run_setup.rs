@@ -79,7 +79,9 @@ fn create_venv(venv_dir: &str, packages: &[&str]) -> SiaResult<()> {
         cmd.args(packages);
         cmd.status()
     } else {
-        let venv_status = Command::new("python3").args(["-m", "venv", venv_dir]).status();
+        let venv_status = Command::new("python3")
+            .args(["-m", "venv", venv_dir])
+            .status();
         if let Err(e) = venv_status {
             return Err(SiaError::new(format!("venv creation failed: {e}")));
         }
@@ -90,21 +92,42 @@ fn create_venv(venv_dir: &str, packages: &[&str]) -> SiaResult<()> {
     };
     status
         .map_err(|e| SiaError::new(format!("venv package install failed: {e}")))
-        .and_then(|s| if s.success() { Ok(()) } else { Err(SiaError::new("venv setup returned non-zero")) })
+        .and_then(|s| {
+            if s.success() {
+                Ok(())
+            } else {
+                Err(SiaError::new("venv setup returned non-zero"))
+            }
+        })
 }
 
 /// Install a requirements.txt into an existing venv (augmenting the baseline packages).
 pub fn install_requirements(venv_dir: &str, requirements_path: &str) -> SiaResult<()> {
     let status = if uv_available() {
         Command::new("uv")
-            .args(["pip", "install", "--python", &venv_python_path(venv_dir), "-r", requirements_path])
+            .args([
+                "pip",
+                "install",
+                "--python",
+                &venv_python_path(venv_dir),
+                "-r",
+                requirements_path,
+            ])
             .status()
     } else {
-        Command::new(venv_pip_path(venv_dir)).args(["install", "-r", requirements_path]).status()
+        Command::new(venv_pip_path(venv_dir))
+            .args(["install", "-r", requirements_path])
+            .status()
     };
     status
         .map_err(|e| SiaError::new(format!("requirements install failed: {e}")))
-        .and_then(|s| if s.success() { Ok(()) } else { Err(SiaError::new("requirements install returned non-zero")) })
+        .and_then(|s| {
+            if s.success() {
+                Ok(())
+            } else {
+                Err(SiaError::new("requirements install returned non-zero"))
+            }
+        })
 }
 
 /// Persist the resolved meta/target profiles as `profiles.json` in the run dir.
@@ -115,10 +138,16 @@ fn write_run_profiles(
 ) {
     let mut profiles = serde_json::Map::new();
     if let Some(m) = meta_profile {
-        profiles.insert("meta".to_string(), serde_json::to_value(m).unwrap_or(json!(null)));
+        profiles.insert(
+            "meta".to_string(),
+            serde_json::to_value(m).unwrap_or(json!(null)),
+        );
     }
     if let Some(t) = target_profile {
-        profiles.insert("target".to_string(), serde_json::to_value(t).unwrap_or(json!(null)));
+        profiles.insert(
+            "target".to_string(),
+            serde_json::to_value(t).unwrap_or(json!(null)),
+        );
     }
     if profiles.is_empty() {
         return;

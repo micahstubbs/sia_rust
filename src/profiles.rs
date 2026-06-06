@@ -46,7 +46,11 @@ fn load_json(name_or_path: &str) -> SiaResult<(serde_json::Value, String)> {
 }
 
 fn require(data: &serde_json::Value, keys: &[&str], source: &str) -> SiaResult<()> {
-    let mut missing: Vec<&str> = keys.iter().copied().filter(|k| data.get(*k).is_none()).collect();
+    let mut missing: Vec<&str> = keys
+        .iter()
+        .copied()
+        .filter(|k| data.get(*k).is_none())
+        .collect();
     if !missing.is_empty() {
         missing.sort();
         return Err(SiaError::new(format!(
@@ -67,13 +71,20 @@ fn profile_base_dir(source: &str) -> Option<PathBuf> {
 }
 
 fn str_field(data: &serde_json::Value, key: &str) -> String {
-    data.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Load and validate a meta-agent profile by bundled/user name or path to a `.json` file.
 pub fn load_meta_agent_profile(name_or_path: &str) -> SiaResult<MetaAgentProfile> {
     let (data, source) = load_json(name_or_path)?;
-    require(&data, &["profile_id", "name", "agent_impl", "model", "provider_id"], &source)?;
+    require(
+        &data,
+        &["profile_id", "name", "agent_impl", "model", "provider_id"],
+        &source,
+    )?;
 
     let provider = load_provider(&str_field(&data, "provider_id"))?;
     let profile = MetaAgentProfile {
@@ -90,7 +101,11 @@ pub fn load_meta_agent_profile(name_or_path: &str) -> SiaResult<MetaAgentProfile
 /// Load and validate a target-agent profile by bundled/user name or path to a `.json` file.
 pub fn load_target_agent_profile(name_or_path: &str) -> SiaResult<TargetAgentProfile> {
     let (data, source) = load_json(name_or_path)?;
-    require(&data, &["profile_id", "name", "model", "provider_id"], &source)?;
+    require(
+        &data,
+        &["profile_id", "name", "model", "provider_id"],
+        &source,
+    )?;
 
     let base_dir = profile_base_dir(&source);
     let agent_reference = parse_agent_reference(data.get("agent_reference"), base_dir.as_deref())?;
@@ -165,7 +180,12 @@ mod tests {
         assert_eq!(p.agent_reference.kind, "default");
         assert_eq!(p.model, "moonshotai/Kimi-K2.6");
         assert_eq!(p.provider.provider_id, "nebius");
-        assert!(p.provider.base_url.as_deref().unwrap().ends_with("nebius.com/v1/"));
+        assert!(p
+            .provider
+            .base_url
+            .as_deref()
+            .unwrap()
+            .ends_with("nebius.com/v1/"));
     }
 
     #[test]
@@ -229,6 +249,9 @@ mod tests {
         );
         let profile = load_target_agent_profile(&path).unwrap();
         assert_eq!(profile.agent_reference.kind, "file");
-        assert_eq!(profile.agent_reference.source.unwrap().file_name().unwrap(), "my_agent.py");
+        assert_eq!(
+            profile.agent_reference.source.unwrap().file_name().unwrap(),
+            "my_agent.py"
+        );
     }
 }

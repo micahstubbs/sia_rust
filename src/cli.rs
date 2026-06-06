@@ -37,7 +37,11 @@ fn add_run_args(cmd: Command, env_config: &Config) -> Command {
             .long("task_dir")
             .help("Path to an external task directory (e.g., ./tasks/my-task)"),
     )
-    .group(ArgGroup::new("task_source").args(["task", "task_dir"]).required(true))
+    .group(
+        ArgGroup::new("task_source")
+            .args(["task", "task_dir"])
+            .required(true),
+    )
     .arg(
         Arg::new("meta_agent_profile")
             .long("meta-agent-profile")
@@ -85,37 +89,45 @@ fn add_run_args(cmd: Command, env_config: &Config) -> Command {
 }
 
 fn add_web_args(cmd: Command) -> Command {
-    cmd.arg(Arg::new("host").long("host").default_value("127.0.0.1").help("Bind host (default: 127.0.0.1)."))
-        .arg(
-            Arg::new("port")
-                .long("port")
-                .value_parser(clap::value_parser!(u16))
-                .default_value("8000")
-                .help("Bind port (default: 8000)."),
-        )
-        .arg(
-            Arg::new("runs_dir")
-                .long("runs-dir")
-                .default_value(names::RUNS_ROOT)
-                .help("Directory of runs to visualize (default: ./runs)."),
-        )
-        .arg(
-            Arg::new("no_browser")
-                .long("no-browser")
-                .action(ArgAction::SetTrue)
-                .help("Do not open a browser window automatically."),
-        )
-        .arg(
-            Arg::new("log_level")
-                .long("log-level")
-                .value_parser(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-                .help("Logging verbosity (default: INFO, or the $SIA_LOG_LEVEL env var)."),
-        )
+    cmd.arg(
+        Arg::new("host")
+            .long("host")
+            .default_value("127.0.0.1")
+            .help("Bind host (default: 127.0.0.1)."),
+    )
+    .arg(
+        Arg::new("port")
+            .long("port")
+            .value_parser(clap::value_parser!(u16))
+            .default_value("8000")
+            .help("Bind port (default: 8000)."),
+    )
+    .arg(
+        Arg::new("runs_dir")
+            .long("runs-dir")
+            .default_value(names::RUNS_ROOT)
+            .help("Directory of runs to visualize (default: ./runs)."),
+    )
+    .arg(
+        Arg::new("no_browser")
+            .long("no-browser")
+            .action(ArgAction::SetTrue)
+            .help("Do not open a browser window automatically."),
+    )
+    .arg(
+        Arg::new("log_level")
+            .long("log-level")
+            .value_parser(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+            .help("Logging verbosity (default: INFO, or the $SIA_LOG_LEVEL env var)."),
+    )
 }
 
 /// Build the top-level `sia` parser with `run` / `web` sub-commands.
 pub fn build_parser(env_config: &Config) -> Command {
-    let run = add_run_args(Command::new("run").about("Run the orchestrator (agent evolution)."), env_config);
+    let run = add_run_args(
+        Command::new("run").about("Run the orchestrator (agent evolution)."),
+        env_config,
+    );
     let web = add_web_args(Command::new("web").about("Serve the runs visualizer over HTTP."));
     Command::new("sia")
         .about("SIA: Self-Improving AI framework")
@@ -157,7 +169,10 @@ mod tests {
 
     #[test]
     fn test_default_subcommand_inserted() {
-        assert_eq!(with_default_subcommand(&["--task".into(), "gpqa".into()]), vec!["run", "--task", "gpqa"]);
+        assert_eq!(
+            with_default_subcommand(&["--task".into(), "gpqa".into()]),
+            vec!["run", "--task", "gpqa"]
+        );
         assert_eq!(with_default_subcommand(&[]), vec!["run"]);
         assert_eq!(with_default_subcommand(&["web".into()]), vec!["web"]);
         assert_eq!(with_default_subcommand(&["--help".into()]), vec!["--help"]);

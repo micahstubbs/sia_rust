@@ -33,6 +33,9 @@ mod tests {
     #[test]
     fn test_pydantic_ai_model_passthrough() {
         assert_eq!(resolve_model("openai:gpt-4o", None), "openai:gpt-4o");
-        assert_eq!(resolve_model("anthropic:claude-sonnet-4-5", None), "anthropic:claude-sonnet-4-5");
+        assert_eq!(
+            resolve_model("anthropic:claude-sonnet-4-5", None),
+            "anthropic:claude-sonnet-4-5"
+        );
     }
 }

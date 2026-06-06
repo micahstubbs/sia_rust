@@ -55,7 +55,14 @@ fn test_add_generation() {
     let mut cm = ContextManager::new(root.to_str().unwrap(), full_config(), None);
     cm.initialize();
     let gen_dir = root.join("gen_1");
-    cm.add_generation(1, &gen_data(&gen_dir.join("target_agent.py"), &gen_dir, "2025-01-01 00:00:00"));
+    cm.add_generation(
+        1,
+        &gen_data(
+            &gen_dir.join("target_agent.py"),
+            &gen_dir,
+            "2025-01-01 00:00:00",
+        ),
+    );
     let content = std::fs::read_to_string(root.join("context.md")).unwrap();
     assert!(content.contains("Generation 1"));
     assert!(content.contains("SUCCESS"));
@@ -67,9 +74,19 @@ fn test_add_generation_with_results_json() {
     let mut cm = ContextManager::new(root.to_str().unwrap(), full_config(), None);
     cm.initialize();
     let gen_dir = root.join("gen_1");
-    std::fs::write(gen_dir.join("results.json"), json!({"accuracy": 0.85, "n_correct": 170, "n_total": 200}).to_string())
-        .unwrap();
-    cm.add_generation(1, &gen_data(&gen_dir.join("target_agent.py"), &gen_dir, "2025-01-01 00:00:00"));
+    std::fs::write(
+        gen_dir.join("results.json"),
+        json!({"accuracy": 0.85, "n_correct": 170, "n_total": 200}).to_string(),
+    )
+    .unwrap();
+    cm.add_generation(
+        1,
+        &gen_data(
+            &gen_dir.join("target_agent.py"),
+            &gen_dir,
+            "2025-01-01 00:00:00",
+        ),
+    );
     let content = std::fs::read_to_string(root.join("context.md")).unwrap();
     assert!(content.contains("0.85"));
 }
@@ -80,8 +97,19 @@ fn test_finalize_with_metrics() {
     let mut cm = ContextManager::new(root.to_str().unwrap(), full_config(), None);
     cm.initialize();
     let gen_dir = root.join("gen_1");
-    std::fs::write(gen_dir.join("results.json"), json!({"accuracy": 0.80}).to_string()).unwrap();
-    cm.add_generation(1, &gen_data(&gen_dir.join("target_agent.py"), &gen_dir, "2025-01-01 00:00:00"));
+    std::fs::write(
+        gen_dir.join("results.json"),
+        json!({"accuracy": 0.80}).to_string(),
+    )
+    .unwrap();
+    cm.add_generation(
+        1,
+        &gen_data(
+            &gen_dir.join("target_agent.py"),
+            &gen_dir,
+            "2025-01-01 00:00:00",
+        ),
+    );
     cm.finalize();
     let content = std::fs::read_to_string(root.join("context.md")).unwrap();
     assert!(content.contains("Summary Statistics"));
@@ -94,15 +122,33 @@ fn test_multiple_generations_track_deltas() {
     cm.initialize();
 
     let gen1 = root.join("gen_1");
-    std::fs::write(gen1.join("results.json"), json!({"accuracy": 0.70}).to_string()).unwrap();
-    cm.add_generation(1, &gen_data(&gen1.join("target_agent.py"), &gen1, "2025-01-01 00:00:00"));
+    std::fs::write(
+        gen1.join("results.json"),
+        json!({"accuracy": 0.70}).to_string(),
+    )
+    .unwrap();
+    cm.add_generation(
+        1,
+        &gen_data(&gen1.join("target_agent.py"), &gen1, "2025-01-01 00:00:00"),
+    );
 
     let gen2 = root.join("gen_2");
     std::fs::create_dir_all(&gen2).unwrap();
-    std::fs::write(gen2.join("target_agent.py"), "print('improved')\nimport os\n").unwrap();
-    std::fs::write(gen2.join("results.json"), json!({"accuracy": 0.85}).to_string()).unwrap();
-    std::fs::write(gen2.join("improvement.md"), "## Changes\n- Added better error handling\n- Improved prompt structure\n")
-        .unwrap();
+    std::fs::write(
+        gen2.join("target_agent.py"),
+        "print('improved')\nimport os\n",
+    )
+    .unwrap();
+    std::fs::write(
+        gen2.join("results.json"),
+        json!({"accuracy": 0.85}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        gen2.join("improvement.md"),
+        "## Changes\n- Added better error handling\n- Improved prompt structure\n",
+    )
+    .unwrap();
     cm.add_generation(
         2,
         &GenData {
@@ -119,8 +165,15 @@ fn test_multiple_generations_track_deltas() {
 #[test]
 fn test_context_manager_stores_injected_config() {
     let d = tempfile::tempdir().unwrap();
-    let cfg = Config { agent_code_preview_limit: 7, context_summary_max_turns: 2, ..Config::default() };
-    let run_config = json!({"meta_model": "x", "agent_impl": "claude"}).as_object().unwrap().clone();
+    let cfg = Config {
+        agent_code_preview_limit: 7,
+        context_summary_max_turns: 2,
+        ..Config::default()
+    };
+    let run_config = json!({"meta_model": "x", "agent_impl": "claude"})
+        .as_object()
+        .unwrap()
+        .clone();
     let cm = ContextManager::new(d.path().to_str().unwrap(), run_config, Some(cfg));
     assert_eq!(cm.cfg().agent_code_preview_limit, 7);
     assert_eq!(cm.cfg().context_summary_max_turns, 2);

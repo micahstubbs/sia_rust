@@ -47,14 +47,26 @@ mod tests {
     #[test]
     fn test_openhands_model_gets_openai_prefix_for_compatible_provider() {
         let nebius = load_provider("nebius").unwrap();
-        assert_eq!(resolve_model("moonshotai/Kimi-K2.6", Some(&nebius)), "openai/moonshotai/Kimi-K2.6");
-        assert_eq!(resolve_model("openai/gpt-4o", Some(&nebius)), "openai/gpt-4o");
+        assert_eq!(
+            resolve_model("moonshotai/Kimi-K2.6", Some(&nebius)),
+            "openai/moonshotai/Kimi-K2.6"
+        );
+        assert_eq!(
+            resolve_model("openai/gpt-4o", Some(&nebius)),
+            "openai/gpt-4o"
+        );
     }
 
     #[test]
     fn test_openhands_model_passthrough_without_compatible_provider() {
-        assert_eq!(resolve_model("claude-sonnet-4-5", None), "claude-sonnet-4-5");
+        assert_eq!(
+            resolve_model("claude-sonnet-4-5", None),
+            "claude-sonnet-4-5"
+        );
         let anthropic = load_provider("anthropic").unwrap();
-        assert_eq!(resolve_model("claude-sonnet-4-5", Some(&anthropic)), "claude-sonnet-4-5");
+        assert_eq!(
+            resolve_model("claude-sonnet-4-5", Some(&anthropic)),
+            "claude-sonnet-4-5"
+        );
     }
 }

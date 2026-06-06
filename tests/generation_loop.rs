@@ -46,8 +46,11 @@ fn make_run_setup(root: &std::path::Path, task_dir: &std::path::Path) -> RunSetu
     }
 }
 
-fn ok_target() -> impl Fn(&str, &str, &str, &str, &str, &str, &Config) -> (bool, String, String, String) {
-    |_venv, _path, _ds, _gen, _log, _sandbox, _cfg| (true, "output".to_string(), String::new(), String::new())
+fn ok_target(
+) -> impl Fn(&str, &str, &str, &str, &str, &str, &Config) -> (bool, String, String, String) {
+    |_venv, _path, _ds, _gen, _log, _sandbox, _cfg| {
+        (true, "output".to_string(), String::new(), String::new())
+    }
 }
 
 #[test]
@@ -55,7 +58,11 @@ fn test_single_generation_creates_context() {
     let d = tempfile::tempdir().unwrap();
     let task_dir = make_task_files(d.path());
     let mut run_setup = make_run_setup(d.path(), &task_dir);
-    let ds = task_dir.join("data").join("public").to_string_lossy().into_owned();
+    let ds = task_dir
+        .join("data")
+        .join("public")
+        .to_string_lossy()
+        .into_owned();
 
     let fb_calls = Arc::new(AtomicUsize::new(0));
     let fb = fb_calls.clone();
@@ -125,7 +132,11 @@ fn test_two_generations_with_feedback() {
         let mut feedback = move |args: &FeedbackArgs| {
             fb.fetch_add(1, Ordering::SeqCst);
             std::fs::create_dir_all(args.next_gen_dir).unwrap();
-            std::fs::write(format!("{}/target_agent.py", args.next_gen_dir), "print('improved')\n").unwrap();
+            std::fs::write(
+                format!("{}/target_agent.py", args.next_gen_dir),
+                "print('improved')\n",
+            )
+            .unwrap();
             std::fs::write(
                 format!("{}/improvement.md", args.next_gen_dir),
                 "- Better prompts\n- More robust error handling\n",
@@ -133,8 +144,19 @@ fn test_two_generations_with_feedback() {
             .unwrap();
             Ok(())
         };
-        run_generation_with(&ok_target(), &mut feedback, 1, 2, &mut run_setup, &task_files, "/data", "/data", "none", &Config::default())
-            .unwrap();
+        run_generation_with(
+            &ok_target(),
+            &mut feedback,
+            1,
+            2,
+            &mut run_setup,
+            &task_files,
+            "/data",
+            "/data",
+            "none",
+            &Config::default(),
+        )
+        .unwrap();
     }
     assert_eq!(fb_calls.load(Ordering::SeqCst), 1);
 
@@ -145,8 +167,19 @@ fn test_two_generations_with_feedback() {
             fb.fetch_add(1, Ordering::SeqCst);
             Ok(())
         };
-        run_generation_with(&ok_target(), &mut feedback, 2, 2, &mut run_setup, &task_files, "/data", "/data", "none", &Config::default())
-            .unwrap();
+        run_generation_with(
+            &ok_target(),
+            &mut feedback,
+            2,
+            2,
+            &mut run_setup,
+            &task_files,
+            "/data",
+            "/data",
+            "none",
+            &Config::default(),
+        )
+        .unwrap();
     }
     assert_eq!(fb_calls.load(Ordering::SeqCst), 1);
 

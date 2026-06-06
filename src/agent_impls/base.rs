@@ -24,9 +24,18 @@ fn registry() -> &'static Mutex<HashMap<String, Runner>> {
     static REGISTRY: OnceLock<Mutex<HashMap<String, Runner>>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
         let mut m: HashMap<String, Runner> = HashMap::new();
-        m.insert("claude".to_string(), Arc::new(super::claude::run_agent_claude));
-        m.insert("openhands".to_string(), Arc::new(super::openhands::run_agent_openhands));
-        m.insert("pydantic-ai".to_string(), Arc::new(super::pydantic_ai::run_agent_pydantic_ai));
+        m.insert(
+            "claude".to_string(),
+            Arc::new(super::claude::run_agent_claude),
+        );
+        m.insert(
+            "openhands".to_string(),
+            Arc::new(super::openhands::run_agent_openhands),
+        );
+        m.insert(
+            "pydantic-ai".to_string(),
+            Arc::new(super::pydantic_ai::run_agent_pydantic_ai),
+        );
         Mutex::new(m)
     })
 }
@@ -48,7 +57,9 @@ pub fn get_agent_impl(name: &str) -> SiaResult<Runner> {
         Some(r) => Ok(r.clone()),
         None => {
             let available = reg.keys().cloned().collect::<Vec<_>>().join(", ");
-            Err(SiaError::new(format!("Unknown agent impl: {name}. Available: {available}")))
+            Err(SiaError::new(format!(
+                "Unknown agent impl: {name}. Available: {available}"
+            )))
         }
     }
 }
@@ -81,7 +92,8 @@ mod tests {
 
     #[test]
     fn test_registry_lists_builtin_agent_impls() {
-        let names: std::collections::HashSet<String> = available_agent_impls().into_iter().collect();
+        let names: std::collections::HashSet<String> =
+            available_agent_impls().into_iter().collect();
         for expected in ["claude", "openhands", "pydantic-ai"] {
             assert!(names.contains(expected), "missing impl {expected}");
         }

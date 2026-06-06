@@ -21,7 +21,11 @@ pub fn bundled_default_filenames(subdir: &str) -> Vec<String> {
     match DEFAULTS.get_dir(subdir) {
         Some(dir) => dir
             .files()
-            .filter_map(|f| f.path().file_name().map(|n| n.to_string_lossy().into_owned()))
+            .filter_map(|f| {
+                f.path()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
             .filter(|n| n.ends_with(".json"))
             .collect(),
         None => Vec::new(),

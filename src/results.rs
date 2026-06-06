@@ -11,7 +11,12 @@ pub struct TargetAgentResult {
 
 impl TargetAgentResult {
     pub fn new(success: bool, stdout: String, stderr: String, error_msg: String) -> Self {
-        TargetAgentResult { success, stdout, stderr, error_msg }
+        TargetAgentResult {
+            success,
+            stdout,
+            stderr,
+            error_msg,
+        }
     }
 
     pub fn as_tuple(self) -> (bool, String, String, String) {
@@ -28,7 +33,10 @@ pub struct FeedbackContext {
 
 impl FeedbackContext {
     pub fn new(execution_status: String, execution_section: String) -> Self {
-        FeedbackContext { execution_status, execution_section }
+        FeedbackContext {
+            execution_status,
+            execution_section,
+        }
     }
 
     pub fn as_tuple(self) -> (String, String) {

@@ -19,7 +19,10 @@ pub const TEXT_ARTIFACTS: &[(&str, &str)] = &[
 ];
 
 fn artifact_filename(label: &str) -> Option<&'static str> {
-    TEXT_ARTIFACTS.iter().find(|(l, _)| *l == label).map(|(_, f)| *f)
+    TEXT_ARTIFACTS
+        .iter()
+        .find(|(l, _)| *l == label)
+        .map(|(_, f)| *f)
 }
 
 /// Candidate names for the structured evaluation summary, in priority order.
@@ -106,7 +109,9 @@ fn read_json(path: &Path) -> Option<Value> {
 }
 
 fn read_text(path: &Path) -> Option<String> {
-    std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    std::fs::read(path)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 fn eval_results_path(gen_dir: &Path) -> Option<PathBuf> {
@@ -315,7 +320,10 @@ pub fn get_run(runs_root: &Path, run_name: &str) -> Option<RunDetail> {
         (None, std::collections::HashMap::new())
     };
 
-    let generations = gen_dirs(&run_dir).into_iter().map(|(gi, gd)| generation_detail(&gd, gi)).collect();
+    let generations = gen_dirs(&run_dir)
+        .into_iter()
+        .map(|(gi, gd)| generation_detail(&gd, gi))
+        .collect();
 
     let profiles = read_json(&run_dir.join("profiles.json")).filter(|v| v.is_object());
 
@@ -367,7 +375,8 @@ fn domain_stats(gen_dir: &Path) -> Vec<DomainStat> {
 
     // domain -> (total, correct), preserving first-seen via a Vec.
     let mut order: Vec<String> = Vec::new();
-    let mut buckets: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
+    let mut buckets: std::collections::HashMap<String, (i64, i64)> =
+        std::collections::HashMap::new();
     for row in details {
         let row = match row.as_object() {
             Some(r) => r,
@@ -384,7 +393,11 @@ fn domain_stats(gen_dir: &Path) -> Vec<DomainStat> {
             (0, 0)
         });
         entry.0 += 1;
-        if row.get("is_correct").map(|v| v.as_bool().unwrap_or(false) || truthy(v)).unwrap_or(false) {
+        if row
+            .get("is_correct")
+            .map(|v| v.as_bool().unwrap_or(false) || truthy(v))
+            .unwrap_or(false)
+        {
             entry.1 += 1;
         }
     }
@@ -395,7 +408,11 @@ fn domain_stats(gen_dir: &Path) -> Vec<DomainStat> {
             domain,
             total,
             correct,
-            accuracy_percent: if total != 0 { correct as f64 / total as f64 * 100.0 } else { 0.0 },
+            accuracy_percent: if total != 0 {
+                correct as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            },
         })
         .collect();
     stats.sort_by(|a, b| a.domain.cmp(&b.domain));
@@ -422,23 +439,44 @@ pub fn get_eval_details(runs_root: &Path, run_name: &str, gen_name: &str) -> Opt
 }
 
 /// Read one of the known text artifacts (by label, not raw path).
-pub fn get_artifact_text(runs_root: &Path, run_name: &str, gen_name: &str, label: &str) -> Option<String> {
+pub fn get_artifact_text(
+    runs_root: &Path,
+    run_name: &str,
+    gen_name: &str,
+    label: &str,
+) -> Option<String> {
     let fname = artifact_filename(label)?;
     let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
     read_text(&gen_dir.join(fname))
 }
 
 /// Per-question chat log, normalized to `[{role, text}]` turns.
-pub fn get_trajectory(runs_root: &Path, run_name: &str, gen_name: &str, qid: i64) -> Option<Vec<Value>> {
+pub fn get_trajectory(
+    runs_root: &Path,
+    run_name: &str,
+    gen_name: &str,
+    qid: i64,
+) -> Option<Vec<Value>> {
     let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
-    let path = gen_dir.join("agent_execution").join(format!("execution_q{qid}.json"));
+    let path = gen_dir
+        .join("agent_execution")
+        .join(format!("execution_q{qid}.json"));
     let data = read_json(&path)?;
     let arr = data.as_array()?;
-    Some(arr.iter().filter(|m| m.is_object()).map(|m| normalize_turn(m.as_object().unwrap())).collect())
+    Some(
+        arr.iter()
+            .filter(|m| m.is_object())
+            .map(|m| normalize_turn(m.as_object().unwrap()))
+            .collect(),
+    )
 }
 
 fn normalize_turn(msg: &serde_json::Map<String, Value>) -> Value {
-    let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let role = msg
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
     let role = if msg.contains_key("role") && !msg.get("role").unwrap().is_string() {
         stringify(msg.get("role").unwrap())
     } else {
@@ -447,7 +485,13 @@ fn normalize_turn(msg: &serde_json::Map<String, Value>) -> Value {
     let content = msg.get("content");
     let text = match content {
         Some(Value::String(s)) => s.clone(),
-        Some(Value::Array(arr)) => arr.iter().map(block_text).collect::<Vec<_>>().join("\n\n").trim().to_string(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .map(block_text)
+            .collect::<Vec<_>>()
+            .join("\n\n")
+            .trim()
+            .to_string(),
         None | Some(Value::Null) => String::new(),
         Some(other) => stringify(other),
     };
@@ -464,12 +508,17 @@ fn block_text(block: &Value) -> String {
             }
             match btype {
                 Some("tool_use") => {
-                    let args = serde_json::to_string_pretty(b.get("input").unwrap_or(&serde_json::json!({})))
-                        .unwrap_or_default();
+                    let args = serde_json::to_string_pretty(
+                        b.get("input").unwrap_or(&serde_json::json!({})),
+                    )
+                    .unwrap_or_default();
                     let name = b.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                     format!("[tool_use: {name}]\n{args}")
                 }
-                Some("tool_result") => format!("[tool_result]\n{}", stringify(b.get("content").unwrap_or(&Value::Null))),
+                Some("tool_result") => format!(
+                    "[tool_result]\n{}",
+                    stringify(b.get("content").unwrap_or(&Value::Null))
+                ),
                 _ => stringify(block),
             }
         }
@@ -495,7 +544,11 @@ fn stringify(value: &Value) -> String {
 }
 
 /// OpenHands session directory names for a generation.
-pub fn list_openhands_sessions(runs_root: &Path, run_name: &str, gen_name: &str) -> Option<Vec<String>> {
+pub fn list_openhands_sessions(
+    runs_root: &Path,
+    run_name: &str,
+    gen_name: &str,
+) -> Option<Vec<String>> {
     let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
     let root = gen_dir.join("openhands_trajectory");
     if !root.is_dir() {
@@ -512,7 +565,12 @@ pub fn list_openhands_sessions(runs_root: &Path, run_name: &str, gen_name: &str)
 }
 
 /// OpenHands event JSON objects for a session.
-pub fn get_openhands_events(runs_root: &Path, run_name: &str, gen_name: &str, session: &str) -> Option<Vec<Value>> {
+pub fn get_openhands_events(
+    runs_root: &Path,
+    run_name: &str,
+    gen_name: &str,
+    session: &str,
+) -> Option<Vec<Value>> {
     let gen_dir = resolve_gen(runs_root, run_name, gen_name)?;
     let session_dir = safe_child(&gen_dir.join("openhands_trajectory"), session)?;
     if !session_dir.is_dir() {
@@ -522,7 +580,11 @@ pub fn get_openhands_events(runs_root: &Path, run_name: &str, gen_name: &str, se
     if !events_dir.is_dir() {
         return Some(Vec::new());
     }
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(&events_dir).ok()?.flatten().map(|e| e.path()).collect();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&events_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
     paths.sort();
     let mut events: Vec<Value> = Vec::new();
     for p in paths {
@@ -567,9 +629,7 @@ fn safe_child(parent: &Path, name: &str) -> Option<PathBuf> {
 /// Resolve `runs_root/run_name/gen_name`, refusing traversal and non-matching names.
 pub fn resolve_gen(runs_root: &Path, run_name: &str, gen_name: &str) -> Option<PathBuf> {
     let run_dir = safe_child(runs_root, run_name)?;
-    if run_dir_index(run_name).is_none() {
-        return None;
-    }
+    run_dir_index(run_name)?;
     let gen_dir = safe_child(&run_dir, gen_name)?;
     if gen_dir_index(gen_name).is_none() || !gen_dir.is_dir() {
         return None;

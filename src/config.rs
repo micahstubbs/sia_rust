@@ -157,6 +157,9 @@ mod tests {
 
     #[test]
     fn test_default_task_model() {
-        assert_eq!(Config::default().default_task_model, "claude-haiku-4-5-20251001");
+        assert_eq!(
+            Config::default().default_task_model,
+            "claude-haiku-4-5-20251001"
+        );
     }
 }

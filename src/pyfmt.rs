@@ -29,7 +29,7 @@ fn group(digits: &str) -> String {
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     let len = bytes.len();
     for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(*b as char);
@@ -73,7 +73,10 @@ mod tests {
     #[test]
     fn test_count_readlines() {
         assert_eq!(count_readlines("print('gen 1 agent')\n"), 1);
-        assert_eq!(count_readlines("import sys\n\n\ndef main():\n    print('x')\n\n\nmain()\n"), 8);
+        assert_eq!(
+            count_readlines("import sys\n\n\ndef main():\n    print('x')\n\n\nmain()\n"),
+            8
+        );
         assert_eq!(count_readlines(""), 0);
         assert_eq!(count_readlines("abc"), 1);
         assert_eq!(count_readlines("a\nb"), 2);

@@ -18,7 +18,13 @@ fn task_files() -> TaskFiles {
 
 #[test]
 fn test_meta_prompt_golden() {
-    let prompt = build_meta_prompt(&task_files(), "claude-haiku-4-5-20251001", "/WORK/run_1/gen_1", None, None);
+    let prompt = build_meta_prompt(
+        &task_files(),
+        "claude-haiku-4-5-20251001",
+        "/WORK/run_1/gen_1",
+        None,
+        None,
+    );
     common::assert_golden("meta_prompt.txt", &prompt);
 }
 
@@ -38,8 +44,13 @@ fn test_meta_prompt_anthropic_provider_is_byte_identical() {
 #[test]
 fn test_meta_prompt_openai_provider_golden() {
     let nebius = load_provider("nebius").unwrap();
-    let prompt =
-        build_meta_prompt(&task_files(), "moonshotai/Kimi-K2.6", "/WORK/run_1/gen_1", Some(&nebius), None);
+    let prompt = build_meta_prompt(
+        &task_files(),
+        "moonshotai/Kimi-K2.6",
+        "/WORK/run_1/gen_1",
+        Some(&nebius),
+        None,
+    );
     common::assert_golden("meta_prompt_openai.txt", &prompt);
 }
 

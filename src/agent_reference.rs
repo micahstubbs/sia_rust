@@ -21,7 +21,11 @@ pub struct AgentReference {
 
 impl AgentReference {
     pub fn default_ref() -> Self {
-        AgentReference { kind: "default".to_string(), source: None, entrypoint: None }
+        AgentReference {
+            kind: "default".to_string(),
+            source: None,
+            entrypoint: None,
+        }
     }
 }
 
@@ -41,7 +45,8 @@ pub struct ResolvedAgentReference {
 /// Resolve a path like Python's `Path.resolve()` (non-strict): absolute + normalized,
 /// resolving symlinks when the path exists.
 fn resolve_path(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(layout::abspath(&p.to_string_lossy())))
+    std::fs::canonicalize(p)
+        .unwrap_or_else(|_| PathBuf::from(layout::abspath(&p.to_string_lossy())))
 }
 
 /// Parse a raw `agent_reference` value from a profile JSON into an `AgentReference`.
@@ -80,12 +85,23 @@ pub fn parse_agent_reference(
     }
     let source = resolve_path(&source);
 
-    let entrypoint = obj.get("entrypoint").and_then(|v| v.as_str()).map(String::from);
+    let entrypoint = obj
+        .get("entrypoint")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     if source.is_dir() {
-        Ok(AgentReference { kind: "dir".to_string(), source: Some(source), entrypoint })
+        Ok(AgentReference {
+            kind: "dir".to_string(),
+            source: Some(source),
+            entrypoint,
+        })
     } else if source.is_file() {
-        Ok(AgentReference { kind: "file".to_string(), source: Some(source), entrypoint: None })
+        Ok(AgentReference {
+            kind: "file".to_string(),
+            source: Some(source),
+            entrypoint: None,
+        })
     } else {
         Err(SiaError::new(format!(
             "agent_reference source not found: {}",
@@ -152,7 +168,10 @@ pub fn resolve_agent_reference(
 }
 
 /// Place reference helper files + requirements.txt into a generation working dir.
-pub fn copy_reference_into(resolved: &ResolvedAgentReference, gen_dir: &Path) -> std::io::Result<()> {
+pub fn copy_reference_into(
+    resolved: &ResolvedAgentReference,
+    gen_dir: &Path,
+) -> std::io::Result<()> {
     if let Some(ref_dir) = &resolved.ref_dir {
         for entry in std::fs::read_dir(ref_dir)? {
             let entry = entry?;
@@ -192,7 +211,11 @@ mod tests {
         let task_dir = tmp.join("task");
         let refd = task_dir.join("reference");
         std::fs::create_dir_all(&refd).unwrap();
-        std::fs::write(refd.join("reference_target_agent.py"), "print('bundled reference')").unwrap();
+        std::fs::write(
+            refd.join("reference_target_agent.py"),
+            "print('bundled reference')",
+        )
+        .unwrap();
         if requirements {
             std::fs::write(refd.join("requirements.txt"), "anthropic\n").unwrap();
         }
@@ -209,7 +232,10 @@ mod tests {
         assert_eq!(refr.kind, "default");
 
         let resolved = resolve_agent_reference(&refr, &layout).unwrap();
-        assert_eq!(resolved.inline_seed.as_deref(), Some("print('bundled reference')"));
+        assert_eq!(
+            resolved.inline_seed.as_deref(),
+            Some("print('bundled reference')")
+        );
         assert_eq!(resolved.ref_dir, None);
         assert_eq!(resolved.entrypoint, "reference_target_agent.py");
         assert_eq!(resolved.requirements, None);
@@ -220,11 +246,16 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let task_dir = task_dir_with_reference(d.path(), true);
         let layout = TaskLayout::new(task_dir.to_str().unwrap(), d.path().to_str().unwrap());
-        let resolved =
-            resolve_agent_reference(&parse_agent_reference(Some(&serde_json::json!("default")), None).unwrap(), &layout)
-                .unwrap();
+        let resolved = resolve_agent_reference(
+            &parse_agent_reference(Some(&serde_json::json!("default")), None).unwrap(),
+            &layout,
+        )
+        .unwrap();
         assert!(resolved.requirements.is_some());
-        assert_eq!(resolved.requirements.unwrap().file_name().unwrap(), "requirements.txt");
+        assert_eq!(
+            resolved.requirements.unwrap().file_name().unwrap(),
+            "requirements.txt"
+        );
     }
 
     #[test]
@@ -236,9 +267,16 @@ mod tests {
     fn test_single_file_reference() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("my_agent.py"), "print('mine')").unwrap();
-        let layout = TaskLayout::new(d.path().join("task").to_str().unwrap(), d.path().to_str().unwrap());
+        let layout = TaskLayout::new(
+            d.path().join("task").to_str().unwrap(),
+            d.path().to_str().unwrap(),
+        );
 
-        let refr = parse_agent_reference(Some(&serde_json::json!({"source": "./my_agent.py"})), Some(d.path())).unwrap();
+        let refr = parse_agent_reference(
+            Some(&serde_json::json!({"source": "./my_agent.py"})),
+            Some(d.path()),
+        )
+        .unwrap();
         assert_eq!(refr.kind, "file");
 
         let resolved = resolve_agent_reference(&refr, &layout).unwrap();
@@ -255,7 +293,10 @@ mod tests {
         std::fs::write(src.join("main.py"), "import helper").unwrap();
         std::fs::write(src.join("helper.py"), "VALUE = 1").unwrap();
         std::fs::write(src.join("requirements.txt"), "numpy\n").unwrap();
-        let layout = TaskLayout::new(d.path().join("task").to_str().unwrap(), d.path().to_str().unwrap());
+        let layout = TaskLayout::new(
+            d.path().join("task").to_str().unwrap(),
+            d.path().to_str().unwrap(),
+        );
 
         let refr = parse_agent_reference(
             Some(&serde_json::json!({"source": "./agent_dir/", "entrypoint": "main.py"})),
@@ -278,7 +319,10 @@ mod tests {
         std::fs::create_dir(&src).unwrap();
         std::fs::write(src.join("main.py"), "x").unwrap();
         std::fs::write(src.join("helper.py"), "y").unwrap();
-        let layout = TaskLayout::new(d.path().join("task").to_str().unwrap(), d.path().to_str().unwrap());
+        let layout = TaskLayout::new(
+            d.path().join("task").to_str().unwrap(),
+            d.path().to_str().unwrap(),
+        );
         let resolved = resolve_agent_reference(
             &parse_agent_reference(
                 Some(&serde_json::json!({"source": "./agent_dir/", "entrypoint": "main.py"})),
@@ -292,8 +336,14 @@ mod tests {
         let gen_dir = d.path().join("gen_1");
         std::fs::create_dir(&gen_dir).unwrap();
         copy_reference_into(&resolved, &gen_dir).unwrap();
-        assert_eq!(std::fs::read_to_string(gen_dir.join("main.py")).unwrap(), "x");
-        assert_eq!(std::fs::read_to_string(gen_dir.join("helper.py")).unwrap(), "y");
+        assert_eq!(
+            std::fs::read_to_string(gen_dir.join("main.py")).unwrap(),
+            "x"
+        );
+        assert_eq!(
+            std::fs::read_to_string(gen_dir.join("helper.py")).unwrap(),
+            "y"
+        );
     }
 
     #[test]
@@ -301,14 +351,19 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let task_dir = task_dir_with_reference(d.path(), true);
         let layout = TaskLayout::new(task_dir.to_str().unwrap(), d.path().to_str().unwrap());
-        let resolved =
-            resolve_agent_reference(&parse_agent_reference(Some(&serde_json::json!("default")), None).unwrap(), &layout)
-                .unwrap();
+        let resolved = resolve_agent_reference(
+            &parse_agent_reference(Some(&serde_json::json!("default")), None).unwrap(),
+            &layout,
+        )
+        .unwrap();
 
         let gen_dir = d.path().join("gen_1");
         std::fs::create_dir(&gen_dir).unwrap();
         copy_reference_into(&resolved, &gen_dir).unwrap();
-        assert_eq!(std::fs::read_to_string(gen_dir.join("requirements.txt")).unwrap(), "anthropic\n");
+        assert_eq!(
+            std::fs::read_to_string(gen_dir.join("requirements.txt")).unwrap(),
+            "anthropic\n"
+        );
         assert!(!gen_dir.join("reference_target_agent.py").exists());
     }
 }

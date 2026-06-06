@@ -37,7 +37,9 @@ pub fn read_config_text(
     if looks_like_path(name_or_path) {
         let path = Path::new(name_or_path);
         if !path.is_file() {
-            return Err(SiaError::new(format!("{kind} file not found: {name_or_path}")));
+            return Err(SiaError::new(format!(
+                "{kind} file not found: {name_or_path}"
+            )));
         }
         let text = std::fs::read_to_string(path)
             .map_err(|e| SiaError::new(format!("{kind} file not found: {name_or_path}: {e}")))?;
@@ -61,7 +63,11 @@ pub fn read_config_text(
     }
 
     let names = available_names(env_var, subdir);
-    let available = if names.is_empty() { "(none)".to_string() } else { names.join(", ") };
+    let available = if names.is_empty() {
+        "(none)".to_string()
+    } else {
+        names.join(", ")
+    };
     Err(SiaError::new(format!(
         "Unknown {kind} '{name_or_path}'. Available: {available} (or pass a path to a .json file)."
     )))

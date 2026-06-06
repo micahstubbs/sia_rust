@@ -4,7 +4,10 @@
 use std::process::Command;
 
 fn sia(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_sia")).args(args).output().expect("run sia")
+    Command::new(env!("CARGO_BIN_EXE_sia"))
+        .args(args)
+        .output()
+        .expect("run sia")
 }
 
 #[test]
@@ -21,7 +24,14 @@ fn test_run_help_exposes_orchestrator_flags() {
     let out = sia(&["run", "--help"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    for flag in ["--max_gen", "--task", "--task_dir", "--meta-agent-profile", "--target-agent-profile", "--sandbox"] {
+    for flag in [
+        "--max_gen",
+        "--task",
+        "--task_dir",
+        "--meta-agent-profile",
+        "--target-agent-profile",
+        "--sandbox",
+    ] {
         assert!(stdout.contains(flag), "missing {flag} in run --help");
     }
 }

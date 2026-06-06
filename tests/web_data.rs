@@ -81,8 +81,16 @@ fn test_get_run_detail_and_domains() {
     let (_d, root) = make_runs_root();
     let detail = rd::get_run(&root, "run_7").unwrap();
     assert!(detail.context_md.is_some());
-    assert!(detail.context_md.as_ref().unwrap().starts_with("# Run Context"));
-    let gen1 = detail.generations.iter().find(|g| g.name == "gen_1").unwrap();
+    assert!(detail
+        .context_md
+        .as_ref()
+        .unwrap()
+        .starts_with("# Run Context"));
+    let gen1 = detail
+        .generations
+        .iter()
+        .find(|g| g.name == "gen_1")
+        .unwrap();
     assert!(gen1.eval.is_some());
     assert_eq!(gen1.eval.as_ref().unwrap().accuracy_percent, Some(50.0));
     assert!(gen1.artifacts.contains(&"target_agent".to_string()));
@@ -100,7 +108,10 @@ fn test_eval_details_and_artifacts() {
     let (_d, root) = make_runs_root();
     let details = rd::get_eval_details(&root, "run_7", "gen_1").unwrap();
     assert_eq!(details.len(), 4);
-    assert_eq!(rd::get_artifact_text(&root, "run_7", "gen_1", "target_agent").as_deref(), Some("print('hello')\n"));
+    assert_eq!(
+        rd::get_artifact_text(&root, "run_7", "gen_1", "target_agent").as_deref(),
+        Some("print('hello')\n")
+    );
     let improvement = rd::get_artifact_text(&root, "run_7", "gen_2", "improvement").unwrap();
     assert!(improvement.starts_with("# Plan"));
 }
@@ -128,9 +139,18 @@ fn test_missing_lookups_return_none() {
 fn test_path_traversal_is_blocked() {
     let (_d, root) = make_runs_root();
     for evil in ["..", "../etc", "run_7/../run_7", "foo/bar", ".", "/abs"] {
-        assert!(rd::get_run(&root, evil).is_none(), "get_run({evil}) should be None");
-        assert!(rd::resolve_gen(&root, evil, "gen_1").is_none(), "resolve_gen({evil}, gen_1)");
-        assert!(rd::resolve_gen(&root, "run_7", evil).is_none(), "resolve_gen(run_7, {evil})");
+        assert!(
+            rd::get_run(&root, evil).is_none(),
+            "get_run({evil}) should be None"
+        );
+        assert!(
+            rd::resolve_gen(&root, evil, "gen_1").is_none(),
+            "resolve_gen({evil}, gen_1)"
+        );
+        assert!(
+            rd::resolve_gen(&root, "run_7", evil).is_none(),
+            "resolve_gen(run_7, {evil})"
+        );
     }
 }
 

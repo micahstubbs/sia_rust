@@ -49,7 +49,11 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
-    pub fn new(run_directory: &str, run_config: Map<String, Value>, config: Option<Config>) -> Self {
+    pub fn new(
+        run_directory: &str,
+        run_config: Map<String, Value>,
+        config: Option<Config>,
+    ) -> Self {
         let cfg = config.unwrap_or_default();
         let meta_model = run_config
             .get("meta_model")
@@ -123,7 +127,8 @@ impl ContextManager {
         // Deltas vs previous generation.
         let deltas = self.generations.last().map(|prev| {
             let prev_stats = prev.agent_stats;
-            let size_pct = (agent_stats.size as f64 - prev_stats.size as f64) / prev_stats.size as f64 * 100.0;
+            let size_pct =
+                (agent_stats.size as f64 - prev_stats.size as f64) / prev_stats.size as f64 * 100.0;
             let lines_delta = agent_stats.lines as i64 - prev_stats.lines as i64;
             (size_pct, lines_delta)
         });
@@ -137,7 +142,15 @@ impl ContextManager {
 
         let llm_summary = self.generate_llm_summary(gen_num);
 
-        let entry = self.format_generation_entry(gen_num, gen_data, &agent_stats, deltas, &metrics, &insights, llm_summary.as_deref());
+        let entry = self.format_generation_entry(
+            gen_num,
+            gen_data,
+            &agent_stats,
+            deltas,
+            &metrics,
+            &insights,
+            llm_summary.as_deref(),
+        );
 
         if let Ok(mut existing) = std::fs::read_to_string(&self.context_path) {
             existing.push_str(&entry);
@@ -187,7 +200,9 @@ impl ContextManager {
         };
 
         let successful = self.generations.iter().filter(|g| g.success).count();
-        let best_gen_label = best_gen.map(|g| g.gen_num.to_string()).unwrap_or_else(|| "N/A".to_string());
+        let best_gen_label = best_gen
+            .map(|g| g.gen_num.to_string())
+            .unwrap_or_else(|| "N/A".to_string());
 
         let growth_lines = last_gen.agent_stats.lines as i64 - first_gen.agent_stats.lines as i64;
         let growth_bytes = last_gen.agent_stats.size as i64 - first_gen.agent_stats.size as i64;
@@ -225,8 +240,13 @@ impl ContextManager {
     fn get_agent_stats(&self, agent_path: &str) -> AgentStats {
         match std::fs::read_to_string(agent_path) {
             Ok(content) => {
-                let size = std::fs::metadata(agent_path).map(|m| m.len()).unwrap_or(content.len() as u64);
-                AgentStats { size, lines: count_readlines(&content) }
+                let size = std::fs::metadata(agent_path)
+                    .map(|m| m.len())
+                    .unwrap_or(content.len() as u64);
+                AgentStats {
+                    size,
+                    lines: count_readlines(&content),
+                }
             }
             Err(_) => AgentStats { size: 0, lines: 0 },
         }
@@ -286,14 +306,26 @@ impl ContextManager {
                     r"test\s+accuracy[:\s=]+(\d+\.?\d*)\s*%?",
                 ],
             ),
-            ("validation", vec![r"validation[:\s=]+(\d+\.?\d*)", r"val[:\s=]+(\d+\.?\d*)"]),
-            ("correct", vec![r"(\d+)\s*/\s*\d+\s+correct", r"correct[:\s=]+(\d+)"]),
-            ("total", vec![r"\d+\s*/\s*(\d+)\s+(?:questions|samples|total)"]),
+            (
+                "validation",
+                vec![r"validation[:\s=]+(\d+\.?\d*)", r"val[:\s=]+(\d+\.?\d*)"],
+            ),
+            (
+                "correct",
+                vec![r"(\d+)\s*/\s*\d+\s+correct", r"correct[:\s=]+(\d+)"],
+            ),
+            (
+                "total",
+                vec![r"\d+\s*/\s*(\d+)\s+(?:questions|samples|total)"],
+            ),
         ];
 
         for (metric_name, pattern_list) in patterns {
             for pattern in pattern_list {
-                let re = regex::RegexBuilder::new(pattern).case_insensitive(true).build().unwrap();
+                let re = regex::RegexBuilder::new(pattern)
+                    .case_insensitive(true)
+                    .build()
+                    .unwrap();
                 if let Some(caps) = re.captures(&content) {
                     if let Some(m) = caps.get(1) {
                         if let Ok(value) = m.as_str().parse::<f64>() {
@@ -312,8 +344,14 @@ impl ContextManager {
             Some(c) => c,
             None => return Vec::new(),
         };
-        let bullet_re = regex::RegexBuilder::new(r"^[-*]\s+(.+)$").multi_line(true).build().unwrap();
-        let numbered_re = regex::RegexBuilder::new(r"^\d+\.\s+(.+)$").multi_line(true).build().unwrap();
+        let bullet_re = regex::RegexBuilder::new(r"^[-*]\s+(.+)$")
+            .multi_line(true)
+            .build()
+            .unwrap();
+        let numbered_re = regex::RegexBuilder::new(r"^\d+\.\s+(.+)$")
+            .multi_line(true)
+            .build()
+            .unwrap();
 
         let mut all: Vec<String> = Vec::new();
         for caps in bullet_re.captures_iter(&content) {
@@ -337,10 +375,14 @@ impl ContextManager {
         if gen_num == 1 {
             return None;
         }
-        let tmp = std::env::temp_dir().join(format!("sia-summary-{}-{}", std::process::id(), gen_num));
+        let tmp =
+            std::env::temp_dir().join(format!("sia-summary-{}-{}", std::process::id(), gen_num));
         std::fs::create_dir_all(&tmp).ok()?;
         let summary_file = tmp.join("summary.txt");
-        let prompt = format!("Summarize the changes for generation {gen_num}. Write to {}", summary_file.display());
+        let prompt = format!(
+            "Summarize the changes for generation {gen_num}. Write to {}",
+            summary_file.display()
+        );
         let result = run_agent(
             &self.meta_model,
             &self.cfg.context_summary_max_turns.to_string(),
@@ -350,7 +392,9 @@ impl ContextManager {
             None,
         );
         let out = match result {
-            Ok(_) => safe_read_file(&summary_file, default_max_bytes()).map(|s| s.trim().to_string()),
+            Ok(_) => {
+                safe_read_file(&summary_file, default_max_bytes()).map(|s| s.trim().to_string())
+            }
             Err(_) => None,
         };
         let _ = std::fs::remove_dir_all(&tmp);
@@ -368,7 +412,11 @@ impl ContextManager {
         insights: &[String],
         llm_summary: Option<&str>,
     ) -> String {
-        let status = if gen_data.success { "✓ SUCCESS" } else { "✗ FAILED" };
+        let status = if gen_data.success {
+            "✓ SUCCESS"
+        } else {
+            "✗ FAILED"
+        };
 
         let mut entry = format!(
             "## Generation {gen_num}\n\n\
@@ -475,7 +523,9 @@ fn is_scalar(v: &Value) -> bool {
 }
 
 fn number(f: f64) -> Value {
-    serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null)
+    serde_json::Number::from_f64(f)
+        .map(Value::Number)
+        .unwrap_or(Value::Null)
 }
 
 /// Format a metric value as the Python f-string would: floats with `.2f`, ints/strings

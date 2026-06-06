@@ -40,7 +40,10 @@ pub fn assert_golden(name: &str, actual: &str) {
         std::fs::write(&path, actual).unwrap();
         return;
     }
-    assert!(path.exists(), "Missing golden '{name}'. Generate with: UPDATE_GOLDEN=1 cargo test");
+    assert!(
+        path.exists(),
+        "Missing golden '{name}'. Generate with: UPDATE_GOLDEN=1 cargo test"
+    );
     let expected = std::fs::read_to_string(&path).unwrap();
     if actual != expected {
         // Produce a small line-diff to make mismatches debuggable.
@@ -52,7 +55,12 @@ pub fn assert_golden(name: &str, actual: &str) {
             let e = exp_lines.get(i).copied().unwrap_or("<none>");
             let a = act_lines.get(i).copied().unwrap_or("<none>");
             if e != a {
-                diff.push_str(&format!("line {}:\n  expected: {:?}\n  actual:   {:?}\n", i + 1, e, a));
+                diff.push_str(&format!(
+                    "line {}:\n  expected: {:?}\n  actual:   {:?}\n",
+                    i + 1,
+                    e,
+                    a
+                ));
             }
         }
         panic!("Golden mismatch for '{name}':\n{diff}");

@@ -55,15 +55,22 @@ pub fn load_agent_execution(gen_directory: &str, config: &Config) -> (Value, boo
         files.sort();
 
         if files.is_empty() {
-            return (json!({"error": "Empty execution folder", "type": "multi-trajectory"}), true);
+            return (
+                json!({"error": "Empty execution folder", "type": "multi-trajectory"}),
+                true,
+            );
         }
 
         let mut trajectories: Vec<Value> = Vec::new();
         for f in &files {
-            let basename = Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let basename = Path::new(f)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             match file_size_ok(f, config.max_execution_log_size) {
                 Ok((within, size)) if !within => {
-                    trajectories.push(json!({"error": "File too large", "file": basename, "size": size}));
+                    trajectories
+                        .push(json!({"error": "File too large", "file": basename, "size": size}));
                     continue;
                 }
                 Ok(_) => {}
@@ -82,7 +89,10 @@ pub fn load_agent_execution(gen_directory: &str, config: &Config) -> (Value, boo
         }
 
         let count = trajectories.len();
-        return (json!({"trajectories": trajectories, "count": count, "type": "multi-trajectory"}), true);
+        return (
+            json!({"trajectories": trajectories, "count": count, "type": "multi-trajectory"}),
+            true,
+        );
     }
 
     if Path::new(&execution_file).exists() {
@@ -108,7 +118,10 @@ pub fn load_agent_execution(gen_directory: &str, config: &Config) -> (Value, boo
                     )
                 }
             },
-            Err(e) => (json!({"error": "Could not read file", "read_error": e.to_string()}), false),
+            Err(e) => (
+                json!({"error": "Could not read file", "read_error": e.to_string()}),
+                false,
+            ),
         }
     } else {
         (json!({"error": "Execution log not found"}), false)
@@ -122,13 +135,22 @@ pub fn load_agent_execution(gen_directory: &str, config: &Config) -> (Value, boo
 /// Outcome of running the evaluate.py subprocess (the injectable seam's return).
 #[derive(Debug, Clone)]
 pub enum EvalOutcome {
-    Completed { returncode: i32, stdout: String, stderr: String },
+    Completed {
+        returncode: i32,
+        stdout: String,
+        stderr: String,
+    },
     TimedOut,
     SpawnError(String),
 }
 
 /// Run evaluate.py if present; returns a JSON status dict. Uses a real subprocess.
-pub fn run_evaluation(gen_directory: &str, task_dir: &str, venv_dir: &str, config: &Config) -> Value {
+pub fn run_evaluation(
+    gen_directory: &str,
+    task_dir: &str,
+    venv_dir: &str,
+    config: &Config,
+) -> Value {
     run_evaluation_with(&real_eval_runner, gen_directory, task_dir, venv_dir, config)
 }
 
@@ -147,14 +169,23 @@ pub fn run_evaluation_with(
 
     let eval_log_file = format!("{gen_directory}/{}", names::EVAL_LOG);
     let python_exec = venv_python_path(venv_dir);
-    let cmd = vec![python_exec, evaluate_script, "--gen-dir".to_string(), gen_directory.to_string()];
+    let cmd = vec![
+        python_exec,
+        evaluate_script,
+        "--gen-dir".to_string(),
+        gen_directory.to_string(),
+    ];
 
     match runner(&cmd, config.eval_timeout) {
         EvalOutcome::TimedOut => {
             json!({"status": "error", "reason": format!("Evaluation timed out after {}s", config.eval_timeout)})
         }
         EvalOutcome::SpawnError(e) => json!({"status": "error", "reason": e}),
-        EvalOutcome::Completed { returncode, stdout, stderr } => {
+        EvalOutcome::Completed {
+            returncode,
+            stdout,
+            stderr,
+        } => {
             let eval_output = format!("{stdout}{stderr}");
             let _ = std::fs::write(&eval_log_file, &eval_output);
 
@@ -196,7 +227,10 @@ fn run_command_with_timeout(cmd: &[String], timeout: u64) -> EvalOutcome {
     use std::sync::mpsc;
 
     let mut command = Command::new(&cmd[0]);
-    command.args(&cmd[1..]).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .args(&cmd[1..])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => return EvalOutcome::SpawnError(e.to_string()),
@@ -260,7 +294,12 @@ pub fn build_sandbox_cmd(dataset_dir: &str, working_dir: &str, config: &Config) 
 }
 
 /// Build the plain (non-sandboxed) target-agent command.
-pub fn build_target_cmd(python_exec: &str, target_agent_path: &str, abs_dataset_dir: &str, gen_dir: &str) -> Vec<String> {
+pub fn build_target_cmd(
+    python_exec: &str,
+    target_agent_path: &str,
+    abs_dataset_dir: &str,
+    gen_dir: &str,
+) -> Vec<String> {
     vec![
         python_exec.into(),
         "-u".into(),
@@ -281,7 +320,7 @@ pub fn stream_to_log(cmd: &[String], stdout_log_file: &str) -> std::io::Result<i
     let mut child = Command::new(&cmd[0])
         .args(&cmd[1..])
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(Stdio::piped()))
+        .stderr(Stdio::piped())
         .spawn()?;
 
     // Merge stderr into stdout by reading both; simplest is to redirect stderr to stdout
@@ -331,12 +370,20 @@ pub fn run_target_agent_with(
                 (true, stdout, String::new(), String::new())
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            (false, String::new(), String::new(), format!("Target agent file not found: {target_agent_path}"))
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            false,
+            String::new(),
+            String::new(),
+            format!("Target agent file not found: {target_agent_path}"),
+        ),
         Err(e) => {
             let stdout = std::fs::read_to_string(stdout_log_file).unwrap_or_default();
-            (false, stdout, String::new(), format!("Unexpected error during target agent execution: {e}"))
+            (
+                false,
+                stdout,
+                String::new(),
+                format!("Unexpected error during target agent execution: {e}"),
+            )
         }
     }
 }
@@ -398,9 +445,15 @@ pub fn build_feedback_context(
     let (agent_execution, is_multi) = load_agent_execution(gen_dir, config);
 
     let execution_section = if is_multi {
-        let trajectory_count = agent_execution.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+        let trajectory_count = agent_execution
+            .get("count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let empty = Vec::new();
-        let trajectories = agent_execution.get("trajectories").and_then(|v| v.as_array()).unwrap_or(&empty);
+        let trajectories = agent_execution
+            .get("trajectories")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&empty);
 
         let successful = trajectories.iter().filter(|t| t.is_array()).count();
         let failed = trajectories
@@ -410,8 +463,14 @@ pub fn build_feedback_context(
 
         let mut sample_trajectories_text = String::new();
         for (idx, traj) in trajectories.iter().take(3).enumerate() {
-            let traj_json = truncate_chars(&json_pretty(traj), config.trajectory_preview_limit, "\n  ... (truncated)");
-            sample_trajectories_text.push_str(&format!("\n### Trajectory {idx}\n```json\n{traj_json}\n```\n"));
+            let traj_json = truncate_chars(
+                &json_pretty(traj),
+                config.trajectory_preview_limit,
+                "\n  ... (truncated)",
+            );
+            sample_trajectories_text.push_str(&format!(
+                "\n### Trajectory {idx}\n```json\n{traj_json}\n```\n"
+            ));
         }
 
         let exec_dir = format!("{gen_dir}/{}", names::AGENT_EXECUTION_DIR);
@@ -447,7 +506,11 @@ The agent executed {trajectory_count} separate trajectories (e.g., different que
             last = trajectory_count - 1,
         )
     } else {
-        let traj_json = truncate_chars(&json_pretty(&agent_execution), config.trajectory_preview_limit, "\n  ... (truncated)");
+        let traj_json = truncate_chars(
+            &json_pretty(&agent_execution),
+            config.trajectory_preview_limit,
+            "\n  ... (truncated)",
+        );
         format!(
             r#"
 Here is the target agent execution trajectory:
@@ -465,10 +528,19 @@ NOTE: If you see an "error" field in the above JSON, it means the execution log 
     let eval_results_section = if Path::new(&results_json_path).exists() {
         match file_size_ok(&results_json_path, config.max_execution_log_size) {
             Ok((within, size)) if !within => {
-                format!("\n**EVALUATION RESULTS**: results.json too large ({} bytes)\n", crate::pyfmt::commas_u64(size))
+                format!(
+                    "\n**EVALUATION RESULTS**: results.json too large ({} bytes)\n",
+                    crate::pyfmt::commas_u64(size)
+                )
             }
-            _ => match std::fs::read_to_string(&results_json_path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
-                Some(eval_data) => format!("\n\n**EVALUATION RESULTS**:\n```json\n{}\n```\n", json_pretty(&eval_data)),
+            _ => match std::fs::read_to_string(&results_json_path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            {
+                Some(eval_data) => format!(
+                    "\n\n**EVALUATION RESULTS**:\n```json\n{}\n```\n",
+                    json_pretty(&eval_data)
+                ),
                 None => "\n**EVALUATION RESULTS**: Error loading results.json\n".to_string(),
             },
         }
@@ -648,15 +720,23 @@ pub fn run_feedback_agent(
     resolved_ref: Option<&ResolvedAgentReference>,
 ) -> SiaResult<()> {
     let layout = RunLayout::new(args.run_dir.to_string());
-    let agent_py = std::fs::read_to_string(layout.target_agent(args.current_gen)).unwrap_or_default();
+    let agent_py =
+        std::fs::read_to_string(layout.target_agent(args.current_gen)).unwrap_or_default();
     let task = std::fs::read_to_string(format!("{dataset_dir}/task.md")).unwrap_or_default();
 
     let previous_gens_text = if args.current_gen > 1 {
-        (1..args.current_gen).map(|n| n.to_string()).collect::<Vec<_>>().join(", ")
+        (1..args.current_gen)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     } else {
         "None".to_string()
     };
-    let previous_gens_text = if previous_gens_text.is_empty() { "None".to_string() } else { previous_gens_text };
+    let previous_gens_text = if previous_gens_text.is_empty() {
+        "None".to_string()
+    } else {
+        previous_gens_text
+    };
 
     let requirements_dir = match resolved_ref {
         Some(r) if r.requirements.is_some() => Some(args.next_gen_dir),

@@ -93,7 +93,10 @@ mod tests {
     fn test_load_nebius_provider() {
         let p = load_provider("nebius").unwrap();
         assert_eq!(p.client_kind, "openai");
-        assert_eq!(p.base_url.as_deref(), Some("https://api.tokenfactory.us-central1.nebius.com/v1/"));
+        assert_eq!(
+            p.base_url.as_deref(),
+            Some("https://api.tokenfactory.us-central1.nebius.com/v1/")
+        );
         assert_eq!(p.api_key_env, "NEBIUS_API_KEY");
     }
 
