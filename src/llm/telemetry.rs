@@ -138,6 +138,44 @@ impl TelemetryLog {
     }
 }
 
+/// Derive a generation index from the trailing digits of a directory name.
+///
+/// `.../gen_3` -> `3`, `.../run/12` -> `12`. Returns `0` when the final path
+/// component has no trailing digits (or `working_dir` has no final component).
+fn generation_from_dir(working_dir: &str) -> u32 {
+    let name = Path::new(working_dir)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let digits: String = name
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    digits.parse().unwrap_or(0)
+}
+
+/// Write a single generation's `telemetry.json` into `working_dir` from the
+/// [`RunMetrics`] a native runner captured at its finish site.
+///
+/// The generation index is derived from the trailing digits of the
+/// `working_dir` directory name (e.g. `.../gen_3` -> 3; default 0 on no match),
+/// then [`GenerationTelemetry::from_metrics`] is recorded into a fresh
+/// [`TelemetryLog`] and flushed to `<working_dir>/telemetry.json`.
+///
+/// Best-effort: this is observability, not correctness. Any IO error is
+/// ignored and the function never panics, so a failed telemetry write never
+/// aborts an otherwise-successful run.
+pub fn write_run_telemetry(working_dir: &str, metrics: &RunMetrics) {
+    let gen = generation_from_dir(working_dir);
+    let mut log = TelemetryLog::new();
+    log.record(GenerationTelemetry::from_metrics(gen, metrics));
+    let _ = log.write_to(working_dir);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +278,46 @@ mod tests {
                 "telemetry JSON must not mention '{forbidden}': {text}"
             );
         }
+    }
+
+    #[test]
+    fn generation_from_dir_reads_trailing_digits() {
+        assert_eq!(generation_from_dir("/runs/run_1/gen_3"), 3);
+        assert_eq!(generation_from_dir("/runs/run_1/gen_12"), 12);
+        assert_eq!(generation_from_dir("/runs/run_1/0"), 0);
+        assert_eq!(generation_from_dir("/runs/run_1/generation_07"), 7);
+        // No trailing digits -> default 0.
+        assert_eq!(generation_from_dir("/runs/run_1/scratch"), 0);
+        assert_eq!(generation_from_dir(""), 0);
+    }
+
+    #[test]
+    fn write_run_telemetry_round_trips_through_web_reader() {
+        // Build the runs/<run>/<gen> layout the web reader expects.
+        let root = tempfile::tempdir().unwrap();
+        let gen_dir = root.path().join("run_1").join("gen_2");
+        fs::create_dir_all(&gen_dir).unwrap();
+
+        let m = metrics(120, 30, 2, 1, 1500);
+        write_run_telemetry(gen_dir.to_str().unwrap(), &m);
+
+        // The file landed next to where agent_execution.json would go.
+        let on_disk = gen_dir.join(TELEMETRY_JSON);
+        assert!(on_disk.is_file(), "telemetry.json written into the gen dir");
+
+        // The single generation entry matches from_metrics(2, &m) (gen derived
+        // from the trailing digits of `.../gen_2`).
+        let v = crate::web::runs::get_generation_telemetry(root.path(), "run_1", "gen_2")
+            .expect("telemetry present and an object");
+        let expected = GenerationTelemetry::from_metrics(2, &m);
+        let parsed: Vec<GenerationTelemetry> =
+            serde_json::from_value(v["generations"].clone()).unwrap();
+        assert_eq!(parsed, vec![expected.clone()]);
+        assert_eq!(v["generations"][0]["generation"], json!(2));
+        assert_eq!(v["cumulative"]["input_tokens"], json!(120));
+        assert_eq!(v["cumulative"]["output_tokens"], json!(30));
+        assert_eq!(v["cumulative"]["num_api_calls"], json!(2));
+        assert_eq!(v["cumulative"]["num_tool_calls"], json!(1));
     }
 
     #[test]

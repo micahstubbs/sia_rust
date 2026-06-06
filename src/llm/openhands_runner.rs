@@ -46,7 +46,8 @@ use crate::error::{SiaError, SiaResult};
 use super::openai_api::{
     ChatMessage, ChatRequest, ChatResponse, ChatTool, ChatTransport, ToolCall,
 };
-use super::tools;
+use super::trajectory_middleware::{RunMetrics, TokenUsage};
+use super::{telemetry, tools};
 
 /// Default `max_tokens` per API response. The loop bounds *turns*; this bounds
 /// the size of any single generation.
@@ -298,8 +299,18 @@ pub fn run_openhands_agent(
     let mut final_text = String::new();
     let mut turns = 0u32;
 
+    // This runner persists events via the OpenHands event log rather than a
+    // [`TrajectoryMiddleware`], so we accumulate the same telemetry shape inline:
+    // provider-reported token usage from each `ChatResponse.usage`, the number of
+    // model API calls (turns), and the number of tool calls issued, plus
+    // wall-clock timing. This feeds `telemetry::write_run_telemetry` at every
+    // exit so a `telemetry.json` lands next to `openhands_trajectory/`.
+    let started = std::time::Instant::now();
+    let mut metrics = RunMetrics::default();
+
     for _ in 0..max_turns.max(1) {
         turns += 1;
+        metrics.num_turns += 1;
         let req = ChatRequest {
             model: model.to_string(),
             messages: messages.clone(),
@@ -309,6 +320,10 @@ pub fn run_openhands_agent(
         };
 
         let resp: ChatResponse = transport.create(&req)?;
+        metrics.usage.add(TokenUsage {
+            input_tokens: resp.usage.prompt_tokens,
+            output_tokens: resp.usage.completion_tokens,
+        });
         let choice = resp
             .choices
             .into_iter()
@@ -321,6 +336,8 @@ pub fn run_openhands_agent(
             final_text = assistant.content.clone().unwrap_or_default();
             log.agent_message(&final_text)?;
             messages.push(assistant);
+            metrics.duration_ms = started.elapsed().as_millis();
+            telemetry::write_run_telemetry(working_dir, &metrics);
             return Ok(OpenHandsRunSummary {
                 final_text,
                 turns,
@@ -333,6 +350,7 @@ pub fn run_openhands_agent(
 
         // Execute each tool call, write action + observation events, feed results back.
         for call in &assistant.tool_calls {
+            metrics.num_tool_calls += 1;
             let args: Value =
                 serde_json::from_str(&call.function.arguments).unwrap_or_else(|_| json!({}));
             let action_name = match call.function.name.as_str() {
@@ -353,6 +371,8 @@ pub fn run_openhands_agent(
     // Reached max_turns without the model ending its turn.
     let note = format!("reached max_turns ({max_turns}) without completing");
     log.agent_message(&note)?;
+    metrics.duration_ms = started.elapsed().as_millis();
+    telemetry::write_run_telemetry(working_dir, &metrics);
     Ok(OpenHandsRunSummary {
         final_text,
         turns,
@@ -514,6 +534,20 @@ mod tests {
 
         assert_eq!(summary.final_text, "finished");
         assert_eq!(summary.turns, 2);
+
+        // telemetry.json is written next to openhands_trajectory/ (issue #88),
+        // sourced from the inline RunMetrics accumulation.
+        let telemetry = gen_dir.join(crate::llm::TELEMETRY_JSON);
+        assert!(
+            telemetry.is_file(),
+            "telemetry.json must be written post-run"
+        );
+        let tv: Value =
+            serde_json::from_str(&std::fs::read_to_string(&telemetry).unwrap()).unwrap();
+        assert_eq!(tv["cumulative"]["num_api_calls"], json!(2));
+        assert_eq!(tv["cumulative"]["num_tool_calls"], json!(1));
+        // gen_dir is `.../gen_0`, so the derived generation index is 0.
+        assert_eq!(tv["generations"][0]["generation"], json!(0));
 
         // Two API calls; the second carries the tool result with the command output.
         assert_eq!(transport.requests.borrow().len(), 2);

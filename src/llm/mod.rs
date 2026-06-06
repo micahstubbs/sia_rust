@@ -80,7 +80,7 @@ pub use rig_runner::RigAgentRunner;
 pub use structured::{
     extract_answer, extract_json_value, extract_struct, Answer, RigStructuredExtractor,
 };
-pub use telemetry::{GenerationTelemetry, TelemetryLog, TELEMETRY_JSON};
+pub use telemetry::{write_run_telemetry, GenerationTelemetry, TelemetryLog, TELEMETRY_JSON};
 pub use trajectory::AgentTrajectory;
 pub use trajectory_middleware::{
     usage_from_rig, RunMetrics, TokenUsage, TrajectoryEvent, TrajectoryMiddleware,

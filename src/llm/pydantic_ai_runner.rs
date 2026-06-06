@@ -41,7 +41,7 @@ use super::openai_api::{
     ChatMessage, ChatRequest, ChatResponse, ChatTool, ChatTransport, ToolCall,
 };
 use super::trajectory_middleware::{TokenUsage, TrajectoryEvent, TrajectoryMiddleware};
-use super::{tools, AgentRunOutcome};
+use super::{telemetry, tools, AgentRunOutcome};
 
 /// Default `max_tokens` per API response. The loop bounds *requests*; this bounds
 /// the size of any single generation.
@@ -216,8 +216,9 @@ pub fn run_pydantic_ai_agent(
                 mw.record(TrajectoryEvent::Error {
                     message: e.to_string(),
                 });
-                let (trajectory, _metrics) = mw.finish();
+                let (trajectory, metrics) = mw.finish();
                 let _ = trajectory.write_to(working_dir);
+                telemetry::write_run_telemetry(working_dir, &metrics);
                 return Err(e);
             }
         };
@@ -244,10 +245,11 @@ pub fn run_pydantic_ai_agent(
 
         if assistant.tool_calls.is_empty() {
             // End of turn.
-            let (trajectory, _metrics) = mw.finish();
+            let (trajectory, metrics) = mw.finish();
             trajectory
                 .write_to(working_dir)
                 .map_err(|e| SiaError::new(format!("failed to write agent_execution.json: {e}")))?;
+            telemetry::write_run_telemetry(working_dir, &metrics);
             return Ok(AgentRunOutcome {
                 final_text,
                 trajectory,
@@ -287,10 +289,11 @@ pub fn run_pydantic_ai_agent(
              (UsageLimits.request_limit equivalent)"
         ),
     });
-    let (trajectory, _metrics) = mw.finish();
+    let (trajectory, metrics) = mw.finish();
     trajectory
         .write_to(working_dir)
         .map_err(|e| SiaError::new(format!("failed to write agent_execution.json: {e}")))?;
+    telemetry::write_run_telemetry(working_dir, &metrics);
     Ok(AgentRunOutcome {
         final_text,
         trajectory,
@@ -471,6 +474,17 @@ mod tests {
         assert_eq!(read_result.role, "tool");
         assert_eq!(read_result.tool_call_id.as_deref(), Some("call_read"));
         assert_eq!(read_result.content.as_deref(), Some("hello body"));
+
+        // telemetry.json is now written next to agent_execution.json (issue #88).
+        let telemetry = wd.join(crate::llm::TELEMETRY_JSON);
+        assert!(
+            telemetry.is_file(),
+            "telemetry.json must be written post-run"
+        );
+        let tv: Value =
+            serde_json::from_str(&std::fs::read_to_string(&telemetry).unwrap()).unwrap();
+        // One write_file + one read_file tool call were issued.
+        assert_eq!(tv["cumulative"]["num_tool_calls"], json!(2));
 
         // agent_execution.json was written and round-trips through the orchestrator.
         let (value, is_multi) =

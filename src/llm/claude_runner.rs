@@ -32,7 +32,7 @@ use super::anthropic_api::{
     ApiMessage, ContentBlock, MessagesRequest, MessagesResponse, MessagesTransport,
 };
 use super::trajectory_middleware::{TokenUsage, TrajectoryEvent, TrajectoryMiddleware};
-use super::{tools, AgentRunOutcome};
+use super::{telemetry, tools, AgentRunOutcome};
 
 /// Default `max_tokens` per API response. The agent loop bounds *turns*; this
 /// bounds the size of any single generation.
@@ -121,8 +121,9 @@ pub fn run_claude_agent(
                 mw.record(TrajectoryEvent::Error {
                     message: e.to_string(),
                 });
-                let (trajectory, _metrics) = mw.finish();
+                let (trajectory, metrics) = mw.finish();
                 let _ = trajectory.write_to(working_dir);
+                telemetry::write_run_telemetry(working_dir, &metrics);
                 return Err(e);
             }
         };
@@ -159,10 +160,11 @@ pub fn run_claude_agent(
         let is_tool_use = resp.stop_reason.as_deref() == Some("tool_use") || !tool_uses.is_empty();
         if !is_tool_use {
             // End of turn.
-            let (trajectory, _metrics) = mw.finish();
+            let (trajectory, metrics) = mw.finish();
             trajectory
                 .write_to(working_dir)
                 .map_err(|e| SiaError::new(format!("failed to write agent_execution.json: {e}")))?;
+            telemetry::write_run_telemetry(working_dir, &metrics);
             return Ok(AgentRunOutcome {
                 final_text,
                 trajectory,
@@ -192,10 +194,11 @@ pub fn run_claude_agent(
     mw.record(TrajectoryEvent::Error {
         message: format!("reached max_turns ({max_turns}) without completing"),
     });
-    let (trajectory, _metrics) = mw.finish();
+    let (trajectory, metrics) = mw.finish();
     trajectory
         .write_to(working_dir)
         .map_err(|e| SiaError::new(format!("failed to write agent_execution.json: {e}")))?;
+    telemetry::write_run_telemetry(working_dir, &metrics);
     Ok(AgentRunOutcome {
         final_text,
         trajectory,
@@ -279,6 +282,62 @@ mod tests {
                 {"role": "assistant", "content": [{"type": "text", "text": "all done"}]},
             ])
         );
+    }
+
+    #[test]
+    fn run_writes_telemetry_json_with_token_and_turn_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        std::fs::write(wd.join("data.txt"), "scripted file body").unwrap();
+        let wd_str = wd.to_str().unwrap();
+
+        // Turn 1: model asks to Read (usage 10/5). Turn 2: model summarizes (10/5).
+        let transport = MockTransport::new(vec![
+            resp(
+                vec![
+                    ContentBlock::Text {
+                        text: "Reading the file.".to_string(),
+                    },
+                    ContentBlock::ToolUse {
+                        id: "toolu_1".to_string(),
+                        name: "Read".to_string(),
+                        input: json!({"path": "data.txt"}),
+                    },
+                ],
+                "tool_use",
+            ),
+            resp(
+                vec![ContentBlock::Text {
+                    text: "done".to_string(),
+                }],
+                "end_turn",
+            ),
+        ]);
+
+        run_claude_agent(
+            &transport,
+            "claude-test",
+            8,
+            "Read data.txt and summarize",
+            wd_str,
+            &Config::default(),
+        )
+        .unwrap();
+
+        // telemetry.json exists and carries the scripted token / turn / tool counts.
+        let telemetry_path = wd.join(crate::llm::TELEMETRY_JSON);
+        assert!(telemetry_path.is_file(), "telemetry.json must be written");
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&telemetry_path).unwrap()).unwrap();
+
+        // Two API calls at 10/5 each = 20 input / 10 output. Two assistant text
+        // turns, one tool call.
+        assert_eq!(v["cumulative"]["input_tokens"], json!(20));
+        assert_eq!(v["cumulative"]["output_tokens"], json!(10));
+        assert_eq!(v["cumulative"]["num_api_calls"], json!(2));
+        assert_eq!(v["cumulative"]["num_tool_calls"], json!(1));
+        // Single generation entry; gen index 0 (temp dir name has no trailing digit).
+        assert_eq!(v["generations"].as_array().unwrap().len(), 1);
     }
 
     #[test]
