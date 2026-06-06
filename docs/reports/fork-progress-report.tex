@@ -2,11 +2,11 @@
 
 % -- Page geometry --
 \usepackage[
-  top=0.85in,
-  bottom=0.75in,
-  left=0.65in,
-  right=0.65in,
-  columnsep=0.25in
+  top=0.72in,
+  bottom=0.62in,
+  left=0.58in,
+  right=0.58in,
+  columnsep=0.22in
 ]{geometry}
 
 % -- Beautiful typography: Century Schoolbook --
@@ -15,7 +15,7 @@
 \usepackage[scaled=0.82]{beramono} % Bera Mono for code
 \usepackage{microtype}             % Microtypographic refinements
 \usepackage{setspace}              % Line spacing control
-\setstretch{1.08}                  % Slightly open leading for readability
+\setstretch{1.02}                  % Compact leading for dense two-column reports
 
 % -- Packages --
 \usepackage{xurl}        % Allow URL breaks at any character (load before hyperref)
@@ -33,8 +33,8 @@
 
 % -- Paragraph spacing (no indent, modest skip) --
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.4em plus 0.1em minus 0.05em}
-\setlength{\emergencystretch}{3em}  % Extra stretch to avoid overfull hboxes in narrow columns
+\setlength{\parskip}{0.24em plus 0.06em minus 0.04em}
+\setlength{\emergencystretch}{1em}  % Extra stretch to avoid overfull hboxes in narrow columns
 
 % -- Code listings with line wrapping --
 \lstset{
@@ -98,9 +98,9 @@
 \titleformat{\paragraph}[runin]
   {\small\bfseries\color{headergray}}
   {\theparagraph)}{0.4em}{}[.\hspace{0.4em}]
-\titlespacing*{\section}{0pt}{1.0em}{0.35em}
-\titlespacing*{\subsection}{0pt}{0.75em}{0.2em}
-\titlespacing*{\subsubsection}{0pt}{0.55em}{0.15em}
+\titlespacing*{\section}{0pt}{0.75em}{0.25em}
+\titlespacing*{\subsection}{0pt}{0.5em}{0.15em}
+\titlespacing*{\subsubsection}{0pt}{0.38em}{0.1em}
 \titlespacing*{\paragraph}{0pt}{0.4em}{0em}
 
 % -- Lists: compact, elegant --
@@ -138,543 +138,333 @@
 \renewcommand{\columnseprulecolor}{\color{rulegray}}
 
 % -- Title --
-\title{\vspace{-1.8em}\LARGE\bfseries\color{titlebg} Fork Progress Report\vspace{-0.3em}}
-\author{CaseMirror Research \\ \small\itshape\href{https://casemirror.ai}{\textcolor{headergray}{casemirror.ai}}}
-\date{{\small\color{headergray} \today}}
+\title{\vspace{-2.3em}\Large\bfseries\color{titlebg} Fork Progress Report\vspace{-0.6em}}
+\author{\normalsize CaseMirror Research \\ \footnotesize\itshape\href{https://casemirror.ai}{\textcolor{headergray}{casemirror.ai}}}
+\date{{\footnotesize\color{headergray} \today}}
 
 \begin{document}
 
 \maketitle
 \thispagestyle{firstpage}
-\vspace{-0.5em}
+\vspace{-0.95em}
 
 
-\textbf{Project:} \texttt{sia\_rust}  
+\textbf{Project:} sia\_rust  
 
-\textbf{Repository:} \texttt{/\allowbreak home/\allowbreak m/\allowbreak sia\_rust}  
+\textbf{Repository:} /home/m/sia\_rust  
 
 \textbf{Survey date:} 2026-06-06  
 
-\textbf{Survey HEAD:} \texttt{da4191a} (\texttt{main})  
+\textbf{Survey HEAD:} da4191a on main  
 
 
 \subsection{Executive Summary}
 
-Since the fork from the upstream SIA project, this repository has been transformed
+Since the fork from the upstream SIA project, this repository has moved from a
 
-from a Python-first self-improving-agent framework into an active Rust port with a
+Python-first self-improving-agent framework into an active Rust implementation
 
-Python execution bridge, native Rust meta/feedback LLM runners behind an optional
+with a Python execution bridge. The deterministic SIA loop now has Rust-native
 
-\texttt{llm} feature, parity tests, a file-backed web dashboard, benchmark/eval harnesses,
+configuration, profile loading, prompt construction, context tracking,
 
-and a substantial demo/reproducibility documentation package.
+orchestration scaffolding, web visualization, benchmarks, parity checks, and a
 
-
-The fork-era work is concentrated in 48 commits on 2026-06-06 after the inferred
-
-upstream baseline \texttt{4b4877f} (`chore: bump minor version as cli contracts have
-
-changed (\#23)`). Across that range, the branch changes 139 files with 33,895
-
-insertions and 333 deletions. The biggest areas of change are \texttt{src/\allowbreak }, \texttt{src/\allowbreak llm/\allowbreak },
-
-\texttt{tests/\allowbreak }, \texttt{docs/\allowbreak }, \texttt{benchmarks/\allowbreak }, \texttt{evals/\allowbreak }, and the project issue-tracking state
-
-under \texttt{.beads/\allowbreak }.
+standalone evaluation crate.
 
 
-The project is in a strong Rust-port state for deterministic/offline surfaces:
+The fork-era work spans 48 commits after the inferred upstream baseline 4b4877f,
 
-default Rust tests pass, default and \texttt{llm} clippy pass, the standalone \texttt{evals/\allowbreak }
+with 139 changed files, 33,895 insertions, and 333 deletions. Most of the work is
 
-crate passes, and the Python/Rust differential parity script reports byte-identical
+in the Rust source tree, the optional native LLM layer, tests, documentation,
 
-output on all checked surfaces. The main remaining risks are live-demo readiness,
+benchmarks, evaluation support, and Beads issue tracking.
 
-live provider validation, hardening of the runtime security story, and replacing
 
-some still-observational or reference-only "closed loop" pieces with acting,
+The current offline verification posture is strong. The default Rust test suite
 
-production-quality behavior.
+passes, formatting and clippy pass for both default and LLM-feature builds, the
+
+evaluation crate passes, and the Python/Rust parity script reports byte-identical
+
+outputs. The main remaining risk is live readiness: provider credentials, ignored
+
+live tests, demo safety, dashboard freshness, and closed-loop actuation still need
+
+focused work.
 
 
 \subsection{Scope And Baseline}
 
-There is no \texttt{upstream} remote configured in this checkout. The only configured
+This checkout has no configured upstream remote. The only configured remote is
 
-remote is:
+origin, pointing at the Micah Stubbs GitHub fork. For that reason this report uses
 
+4b4877f, titled "chore: bump minor version as cli contracts have changed (\#23)",
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item \texttt{origin}: \texttt{git@github.com:micahstubbs/\allowbreak sia\_rust.git}
-\end{itemize}
-
-Accordingly, this report treats the last pre-fork upstream-looking commit as an
-
-inferred baseline rather than a remote-confirmed fork point:
+as the inferred upstream baseline.
 
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Upstream baseline used for this report: \texttt{4b4877f}
-  \item Baseline subject: \texttt{chore: bump minor version as cli contracts have changed (#23)}
-  \item Commits through that baseline: 11
-  \item Fork-era commits after that baseline at survey time: 48
-\end{itemize}
+There were 11 commits through that baseline and 48 fork-era commits after it at
 
-At survey time, \texttt{main} was ahead of \texttt{origin/\allowbreak main} by one commit:
+the time of survey. The surveyed local head was da4191a, "Sync beads tracker after
 
+upstream review." During PDF generation, origin/main advanced by three additional
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item \texttt{da4191a} - \texttt{Sync beads tracker after upstream review}
-\end{itemize}
+remote commits, so this report evaluates the local checkout at da4191a and does
 
-During PDF generation, \texttt{origin/\allowbreak main} advanced by three additional remote commits
+not cover those later remote commits. The report/PDF artifact commit itself is
 
-(\texttt{18e2f24}, \texttt{9442ced}, and \texttt{f1890b1}). This report evaluates the local checkout at
-
-\texttt{da4191a} and does not include those later remote commits.
+also outside the survey counts.
 
 
-The report/PDF artifact commit generated from this document is not included in
-
-those counts.
-
-
-\subsection{Work Completed Since The Fork}
+\subsection{Work Completed}
 
 \subsubsection{Rust Port Foundation}
 
-The largest milestone is \texttt{49415c2}, `Rust port of SIA framework (exhaustive parity
+The largest milestone is 49415c2, "Rust port of SIA framework (exhaustive parity +
 
-+ benchmarks + dsrs evals)`. It introduced the Rust crate, CLI, CI workflow,
+benchmarks + dsrs evals)." It introduced the Rust crate, command-line binary,
 
-benchmarks, tests, parity tooling, and the core ported modules.
+CI workflow, Criterion benchmarks, parity tooling, and the core ported modules.
 
+The Rust code now mirrors the Python package surface for configuration, providers,
 
-Major Rust modules now mirror the Python package surface:
+profiles, task layout, run setup, prompt building, context management,
 
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Configuration, providers, profiles, API-key resolution, and bundled config files.
-  \item Task layout and run-directory setup.
-  \item Prompt building and context management.
-  \item Orchestrator and generation loop scaffolding.
-  \item Target-agent execution through a Python subprocess using the existing
-\end{itemize}
-  \texttt{evaluate.py} contract.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Web data model and Axum server for \texttt{sia web}.
-  \item CPython-compatible JSON formatting for byte-for-byte parity.
-\end{itemize}
-
-The public project framing was also rewritten. \texttt{README.md} now presents this as a
-
-Rust port of SIA with a Python bridge rather than as the original Python package.
-
-\texttt{docs/\allowbreak RUST\_PORT.md} documents the Python-to-Rust module map, build/test commands,
-
-native-runner feature gate, parity surfaces, benchmarks, evals, and known testing
-
-seams.
+orchestration, results, and web data.
 
 
-\subsubsection{Native Meta/Feedback LLM Runners}
+The target-agent execution boundary intentionally remains Python. Generated target
 
-The fork added a substantial native LLM layer under \texttt{src/\allowbreak llm/\allowbreak }, gated by the
+agents still run as Python subprocesses through the existing evaluate.py task
 
-optional \texttt{llm} Cargo feature. This includes:
+contract, preserving the original paper's task/evaluator semantics while allowing
 
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item \texttt{AgentRunner} abstraction and trajectory context/outcome types.
-  \item Anthropic Messages API transport and OpenAI-compatible chat transport types.
-  \item Claude, OpenHands-style, and PydanticAI-style runner loops.
-  \item Tool execution for read/write/edit/glob/bash.
-  \item Trajectory logging middleware.
-  \item Retry/backoff and transport decorators.
-  \item Structured-output extraction/parity support.
-  \item Provider/profile-to-client mapping.
-  \item Per-run telemetry generation.
-  \item Tavily web-search client primitive.
-\end{itemize}
-
-This closes a major boundary from the initial port: meta/feedback agents can now
-
-use native Rust LLM clients when the crate is built with \texttt{-\allowbreak -\allowbreak features llm}, while
-
-the target agent remains a Python subprocess so generated task agents preserve the
-
-paper's task/evaluator contract.
+the orchestrator and deterministic scaffolding to move into Rust.
 
 
-\subsubsection{Closed-Loop Extensions: Scheduler, Weights, And Verifiers}
+The project framing was rewritten accordingly. The README and Rust-port
 
-The fork adds first-pass closed-loop machinery beyond the baseline SIA harness
+documentation now present the repository as a Rust implementation with a Python
 
-update flow:
-
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Adaptive scheduler logic in \texttt{src/\allowbreak scheduler.rs}.
-  \item Scheduler decision recording and dashboard surfacing through \texttt{src/\allowbreak closed\_loop.rs}
-\end{itemize}
-  and web data endpoints.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item A native \texttt{WeightUpdater} abstraction and CPU reference LoRA-style updater in
-\end{itemize}
-  \texttt{src/\allowbreak weights.rs}.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Reusable verifier traits and task robustness helpers in \texttt{src/\allowbreak verifier.rs}.
-\end{itemize}
-
-These are meaningful research/product extensions, but the issue tracker correctly
-
-records that some are still partial. In particular, the current scheduler path is
-
-observational in key places, and the CPU weight-update path is a reference toy
-
-rather than real model training or an adapter that is loaded by the target agent.
+bridge, and docs/RUST\_PORT.md maps the Python modules to their Rust equivalents.
 
 
-\subsubsection{SIA Studio And Web/Demo Surface}
+\subsubsection{Native LLM Layer}
 
-The fork upgraded the web surface into a more complete "SIA Studio" dashboard:
+The fork added a substantial optional native LLM layer under src/llm, gated by the
 
+LLM Cargo feature. It includes an AgentRunner abstraction, Anthropic Messages API
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Telemetry and metrics charts.
-  \item Dark-mode/polished UI work.
-  \item Run-level scheduler decision timeline.
-  \item API endpoints for telemetry, metrics, scheduler decisions, and weight updates.
-\end{itemize}
+types, OpenAI-compatible chat transport types, Claude/OpenHands/PydanticAI-style
 
-The dashboard is functional for file-backed run visualization, but current open
+runner loops, tool execution, retry/backoff behavior, structured-output support,
 
-issues identify important demo gaps: auto-refresh is missing, port-bind failures
+trajectory logging, telemetry, provider-to-client mapping, and a Tavily search
 
-can be hidden, and run IDs can collide during rehearsal or stage demos.
+client primitive.
 
 
-\subsubsection{Security And Sandboxing}
+This closes a major boundary from the initial port. Meta and feedback agents can
 
-The fork added a formal security posture and first hardening primitives:
+now use native Rust LLM clients when built with the LLM feature, while the target
 
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item \texttt{SECURITY.md} threat model.
-  \item \texttt{src/\allowbreak sandbox.rs} capability allow-list abstraction.
-  \item Tests for read/write/bash permissions, path containment, and size limits.
-  \item Native tool executors wired to capability checks.
-  \item Docker sandbox command generation for Python target-agent execution.
-\end{itemize}
-
-The current security story is honest but not finished. The default native-runner
-
-capability profile still allows broad Bash behavior, and the Docker sandbox path is
-
-not yet a drop-in safe path for live LLM-calling target agents because network,
-
-dependencies, and credentials require an explicit policy.
+agent continues to use the Python task bridge.
 
 
-\subsubsection{Providers, Credentials, And Reproducibility}
+\subsubsection{Closed-Loop Research Extensions}
 
-The fork added or expanded provider support and documentation:
+The fork added first-pass machinery for research extensions beyond plain harness
+
+updates. The scheduler records adaptive decisions and exposes them through both
+
+artifacts and the web dashboard. The weights module defines a native update
+
+abstraction and a CPU reference LoRA-style updater. The verifier module adds
+
+reusable exact-match, multiple-choice, numeric, and robustness helpers.
 
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Bundled Nebius profiles and model-slug verification tooling.
-  \item Bundled Gemini target profile and tests.
-  \item Bundled Tinker provider plus \texttt{gptoss-\allowbreak tinker-\allowbreak target} and
-\end{itemize}
-  \texttt{qwen3-\allowbreak tinker-\allowbreak target} profiles.
+These extensions are useful but not yet complete. The scheduler decision is still
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item \texttt{.env} loading at startup, with real environment variables taking precedence.
-  \item Per-provider credentials documentation in \texttt{docs/\allowbreak CREDENTIALS.md}.
-  \item Nebius quickstart and model verification docs.
-  \item Reproducibility standards and run-artifact checklist.
-  \item Hackathon demo script, slide outline, run-of-show, and judging narrative.
-  \item Preprint-style draft in \texttt{docs/\allowbreak paper/\allowbreak sia\_rust\_preprint.md}.
-\end{itemize}
+observational in important places, and the CPU weight path is a reference
 
-This gives the project a strong external-facing package, but live provider paths
+demonstrator rather than a real model-training path whose adapter is loaded by a
 
-remain mostly guarded behind ignored tests that require real keys and network
+target agent.
 
-access.
+
+\subsubsection{SIA Studio}
+
+The web surface has been upgraded into a file-backed "SIA Studio" dashboard with
+
+telemetry, metrics charts, dark-mode polish, scheduler timelines, and endpoints
+
+for telemetry, metrics, scheduler decisions, and weight-update artifacts. It is
+
+already useful for replaying and inspecting runs, but open issues correctly flag
+
+live-demo gaps: the UI needs auto-refresh, dashboard port binding needs clearer
+
+failure/fallback behavior, and demo run IDs need collision-proof defaults.
+
+
+\subsubsection{Safety And Sandboxing}
+
+The fork added a formal threat model in SECURITY.md and a first auditable
+
+capability layer in src/sandbox.rs. Native tool executors can check read, write,
+
+bash, path-containment, and size permissions. The orchestrator also has Docker
+
+sandbox command generation for Python target-agent execution.
+
+
+The safety story is honest but incomplete. The default native-runner capability
+
+profile still permits broad Bash behavior, and Docker mode is not yet a drop-in
+
+safe path for live provider-calling target agents because network access,
+
+dependencies, and credential handling require a clearer policy.
+
+
+\subsubsection{Providers And Reproducibility}
+
+The fork added Nebius and Gemini support, later expanded with a Tinker provider
+
+and bundled GPT-OSS and Qwen3 Tinker target profiles. It also added .env loading,
+
+credential documentation, Nebius quickstarts, model-slug verification tooling,
+
+reproducibility standards, a hackathon run-of-show, a slide outline, and a
+
+preprint-style project paper draft.
+
+
+The project now has a credible external-facing package for a demo or research
+
+submission. The remaining weakness is not documentation volume; it is live
+
+validation with real provider keys and recorded end-to-end artifacts.
 
 
 \subsubsection{Benchmarks And Evals}
 
-The fork added multiple validation/evaluation assets:
+The fork added Criterion benchmarks, Python-vs-Rust benchmark scripts, a benchmark
+
+report, a standalone DSRs/dspy-rs evaluation crate, and a differential parity
+
+script. The benchmark report records the deterministic core as about 5.8x faster
+
+by geometric mean, while the parity script confirms byte-identical behavior across
+
+JSON, prompt, feedback-context, and execution-log loading surfaces.
 
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Criterion benchmark scaffold under \texttt{benches/\allowbreak core.rs}.
-  \item Python-vs-Rust benchmark scripts under \texttt{benchmarks/\allowbreak }.
-  \item \texttt{benchmarks/\allowbreak REPORT.md}, documenting the deterministic core as about 5.8x faster
-\end{itemize}
-  by geometric mean in the benchmark report.
+\subsubsection{Operations}
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Standalone \texttt{evals/\allowbreak } crate using DSRs/dspy-rs for a GPQA-style multiple-choice
-\end{itemize}
-  evaluation harness with offline mock tests.
+The project now has Beads tracking, local agent guidance, a package manifest,
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Differential parity script at \texttt{scripts/\allowbreak parity\_check.py}.
-\end{itemize}
+GitHub-issue mirroring scripts, session summaries, close-session tracker lessons,
 
-\subsubsection{Project Operations And Issue Tracking}
+expanded CLAUDE.md instructions, and a packaging metadata guard for the OpenHands
 
-The latest local commits added project operations scaffolding:
+optional extra. At survey time Beads showed 18 open issues and 17 ready issues.
+
+The most urgent ready work is demo and safety oriented: hardened native-runner
+
+capabilities, Docker-sandbox clarity, a stage-safe demo command, and SIA Studio
+
+auto-refresh.
 
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item \texttt{.beads/\allowbreak } project configuration and issue export.
-  \item \texttt{CLAUDE.md} local agent guidance.
-  \item \texttt{package.json}.
-  \item \texttt{scripts/\allowbreak seed\_beads\_from\_gh.sh}.
-  \item A session summary under \texttt{docs/\allowbreak session-\allowbreak summaries/\allowbreak }.
-  \item Mirroring of 18 open GitHub issues into Beads.
-  \item Subsequent Beads synchronization after upstream review.
-  \item Expanded \texttt{CLAUDE.md} local agent instructions covering build, test, parity, and
-\end{itemize}
-  architecture guidance.
+\subsection{Verification}
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Python packaging metadata guard for the OpenHands optional extra, constraining
-\end{itemize}
-  it to supported Python versions.
+The default Rust suite passed with cargo test. The library crate reported 154
+
+passed tests, and the integration and doc tests also passed.
 
 
-At survey time, \texttt{br list} showed 18 open issues. \texttt{br ready -\allowbreak -\allowbreak limit 20} showed 17
+The LLM-feature suite still has a parallel-test isolation bug. Under default
 
-ready issues with no blockers. The P1 ready work is heavily demo/safety oriented:
+parallel execution, provider-mapping tests race on process environment variables;
 
+that run aborted after 272 library tests passed, 4 failed, and 6 were ignored.
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Harden native-runner capability profile for demo safety.
-  \item Make Docker sandbox usable or clearly scoped for LLM-calling target agents.
-  \item Add a stage-safe live demo command.
-  \item Make SIA Studio auto-refresh during live runs.
-\end{itemize}
+The same suite passed when serialized with one test thread: 276 library tests
 
-\subsection{Current Verification Results}
+passed, 6 live-provider tests remained ignored, and the LLM integration and doc
 
-Commands run during this survey:
+tests passed.
 
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Default Rust suite: passed with \texttt{cargo test}; the library crate reported 154
-\end{itemize}
-  passed tests, and the integration/doc tests also passed.
+The standalone eval crate passed its 4 offline tests. Formatting passed, and
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Parallel \texttt{llm} suite: failed under default parallel execution; the library
-\end{itemize}
-  crate reported 272 passed, 4 failed, and 6 ignored tests before aborting. The
+clippy passed with warnings denied for both the default and LLM-feature builds.
 
-  failures were \texttt{llm::provider\_mapping} tests racing on process environment
+The Python/Rust parity script reported "PARITY OK: all surfaces byte-identical."
 
-  variables.
+The broader Python pytest suite was not run because pytest is not installed in
 
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Serialized \texttt{llm} suite: passed with \texttt{-\allowbreak -\allowbreak test-\allowbreak threads=1}; the library crate
-\end{itemize}
-  reported 276 passed and 6 ignored tests, and the \texttt{llm} integration/doc tests
-
-  also passed.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Standalone eval crate: passed with 4 offline tests.
-  \item Formatting and lints: \texttt{cargo fmt -\allowbreak -\allowbreak check}, default clippy, and \texttt{llm} clippy all
-\end{itemize}
-  passed with warnings denied.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Differential parity: passed; the script reported `PARITY OK: all surfaces
-\end{itemize}
-  byte-identical`.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Python pytest suite: not run because \texttt{pytest} is not installed in this
-\end{itemize}
-  environment.
-
-\begin{itemize}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Packaging metadata unittest: passed.
-\end{itemize}
-
-The normal parallel \texttt{llm} test failure is worth treating as a real test-isolation
-
-issue even though serialized execution passes. The failing tests mutate global
-
-environment variables using a helper that snapshots/restores state, but other
-
-parallel tests also read or mutate those variables. A mutex or serial-test pattern
-
-would make this robust under default \texttt{cargo test -\allowbreak -\allowbreak features llm}.
+this environment; the packaging metadata unittest passed.
 
 
-\subsection{Current Worktree State}
+\subsection{Current State}
 
-At survey time, before updating this document and generating the PDF artifacts,
+Before updating this report and generating the PDF artifacts, the worktree was
 
-the worktree was clean. \texttt{main} was one commit ahead of \texttt{origin/\allowbreak main}, with the
+clean except for the branch relationship: main was one commit ahead of origin/main.
 
-only ahead commit being \texttt{da4191a} (\texttt{Sync beads tracker after upstream review}).
+During report/PDF generation, an unstaged Beads JSONL update appeared; it was left
 
-During report/PDF generation, an unstaged \texttt{.beads/\allowbreak issues.jsonl} update appeared;
-
-it is intentionally outside the report artifact commit.
+outside the report artifact commit.
 
 
-\subsection{Main Remaining Risks}
+\subsection{Remaining Risks}
 
-The current backlog and verification results point to these high-value next steps:
+The next high-value work is to make the LLM-feature tests pass under normal
+
+parallel execution, then run ignored live-provider tests with real Anthropic,
+
+OpenHands-compatible, PydanticAI-compatible, Gemini, Nebius, structured-output,
+
+and Tavily credentials. A complete live SIA run should be recorded with artifacts.
 
 
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Fix the \texttt{llm} feature test race so \texttt{cargo test -\allowbreak -\allowbreak features llm} passes under
-\end{enumerate}
-   default parallel test execution.
+The closed-loop story also needs to become acting rather than merely visible:
 
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Run live provider validation with real keys: ignored Anthropic, OpenHands,
-\end{enumerate}
-   PydanticAI, Gemini, Nebius, structured-output, and Tavily live tests.
+scheduler decisions should drive the generation path, and the weight-update path
 
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Run a complete live \texttt{sia run -\allowbreak -\allowbreak features llm} self-improvement loop and capture
-\end{enumerate}
-   the artifacts.
+should either become a real model update or be clearly scoped as an offline
 
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Make the scheduler decision actually drive the generation loop rather than only
-\end{enumerate}
-   producing artifacts/logging.
+demonstrator. Demo hardening remains important: safer native-runner permissions,
 
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Replace or supplement the CPU reference weight updater with a real model update
-\end{enumerate}
-   path, or clearly scope it as an offline demonstrator.
+Docker policy clarity, auto-refreshing dashboards, reliable port behavior,
 
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Harden native-runner tool permissions for demo mode.
-  \item Clarify or implement Docker sandbox support for live provider-calling target
-\end{enumerate}
-   agents.
-
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Fix demo fragility: SIA Studio auto-refresh, dashboard port handling,
-\end{enumerate}
-   collision-proof run IDs, and a fast stage-safe task.
-
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Resolve documentation/package identity issues that still point to the original
-\end{enumerate}
-   Python repository.
-
-\begin{enumerate}
-\setlength{\itemsep}{0pt}
-\setlength{\parskip}{0pt}
-  \item Install/use the Python test environment so the full Python pytest suite can be
-\end{enumerate}
-    included in regular verification.
+collision-proof run IDs, and a fast stage-safe task.
 
 
 \subsection{Overall Assessment}
 
-The fork has already accomplished the hard architectural work: the deterministic
+The fork has already accomplished the hard architectural work. The deterministic
 
 SIA loop is represented in Rust, parity is actively tested, native meta/feedback
 
 LLM runners exist, telemetry and dashboard surfaces are in place, and the project
 
-has a strong documentation and demo package.
+has a serious documentation and demo package.
 
 
-The project is not yet "live-demo hardened." Its deterministic and offline
+The project is not yet live-demo hardened. Its deterministic and offline
 
-verification story is strong, but the live-provider path, security defaults,
+verification story is strong, but live-provider execution, security defaults,
 
 dashboard freshness, and closed-loop actuation still need focused work before the
 
-repository can credibly claim a fully production-ready self-improving loop.
+repository can credibly claim a production-ready self-improving loop.
 
 
 
