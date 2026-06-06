@@ -25,6 +25,7 @@ pub mod results;
 pub mod run;
 pub mod run_setup;
 pub mod sandbox;
+pub mod scheduler;
 pub mod task_files;
 pub mod verifier;
 pub mod web;
