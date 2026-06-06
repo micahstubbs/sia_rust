@@ -28,6 +28,7 @@ pub mod sandbox;
 pub mod task_files;
 pub mod verifier;
 pub mod web;
+pub mod weights;
 
 pub use task_files::TaskFiles;
 
