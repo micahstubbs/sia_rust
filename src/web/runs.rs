@@ -257,7 +257,7 @@ pub fn list_runs(runs_root: &Path) -> Vec<RunSummary> {
             }
         }
     }
-    runs.sort_by(|a, b| b.index.cmp(&a.index));
+    runs.sort_by_key(|r| std::cmp::Reverse(r.index));
     runs
 }
 
