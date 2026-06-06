@@ -6,6 +6,129 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
+## What this repo is
+
+A **Rust port** of the Python `sia` (Self-Improving AI) framework. Both
+implementations coexist on purpose: `src/` is the Rust port, `sia/` is the
+original Python package, and the two are held to **byte-for-byte parity** on every
+deterministic surface (prompts, `context.md`, feedback context, JSON serialization)
+via a CI gate. When changing anything that produces those outputs, parity is the
+contract — see "Parity" below.
+
+The self-improvement loop: a **Meta-Agent** writes/improves a target agent, the
+**Target-Agent** runs the task as a real Python subprocess (the `evaluate.py`
+contract, optionally Docker-sandboxed), and a **Feedback-Agent** analyzes the
+trajectory and proposes the next improvement. Meta/feedback agents have native Rust
+LLM runners behind the optional `llm` feature; target agents always run as Python
+subprocesses.
+
+## Build, test, run
+
+```bash
+cargo build                      # lean default build (no LLM client deps)
+cargo build --features llm       # include native rig-core LLM runners
+cargo test                       # full suite (unit + integration + golden parity)
+cargo test --features llm        # also LLM-runner / middleware tests (offline)
+cargo run -- web                 # serve the runs visualizer (./runs by default)
+cargo run -- --help             # CLI help (run / web sub-commands)
+
+# Single test / filter (standard cargo):
+cargo test <name_substring>                         # e.g. cargo test context_golden
+cargo test --test orchestrator                       # one integration test file
+cargo test --features llm --test end_to_end_llm      # llm-gated integration file
+
+cargo fmt --all -- --check       # CI requires clean fmt
+cargo clippy --all-targets -- -D warnings            # CI requires zero warnings
+cargo clippy --all-targets --features llm -- -D warnings
+```
+
+CI (`.github/workflows/rust.yml`) runs fmt, clippy, and `cargo test` for **both**
+the default and `--features llm` builds, plus the parity gate and the standalone
+`evals/` crate. Match that locally before pushing.
+
+### Parity gate (cross-language)
+
+```bash
+cargo build --bin sia-parity     # builds target/debug/sia-parity (helper)
+python scripts/parity_check.py   # diffs Rust vs Python; exits non-zero on any diff
+```
+
+`sia-parity` emits the Rust output for an operation given a JSON request on stdin;
+`parity_check.py` runs the Python reference on the same inputs and asserts
+byte-identical results across an ASCII + CJK + emoji + control-char matrix. The
+`src/pyjson.rs` serializer must reproduce CPython's
+`json.dumps(..., ensure_ascii=True)` exactly. If you touch prompts, context
+building, or JSON output, run this.
+
+### Evals crate (standalone)
+
+```bash
+cargo test --manifest-path evals/Cargo.toml          # GPQA-style harness, offline mock
+```
+
+`evals/` is a separate crate built on `dspy-rs`. It runs fully offline in CI; see
+`evals/README.md`.
+
+### Python side
+
+```bash
+python -m pytest tests/ -v       # Python reference test suite
+ruff check sia/ tests/ && ruff format --check sia/ tests/   # lint + format
+```
+
+## Architecture
+
+The Rust module layout in `src/` mirrors the Python package `sia/` one-to-one
+(`config.rs`↔`config.py`, `orchestrator.rs`+`run.rs`↔`orchestrator.py`,
+`web/`↔`web/`, etc.). The full Python→Rust module map, native-LLM-runner design,
+and testing seams are in **[docs/RUST_PORT.md](docs/RUST_PORT.md)** — read it before
+non-trivial work.
+
+Key pieces:
+
+- **Orchestration** (`orchestrator.rs`, `run.rs`, `run_setup.rs`,
+  `scheduler.rs`, `closed_loop.rs`): the generation loop — task resolution,
+  profile/provider loading, run-directory + venv setup, prompt building,
+  target-agent subprocess execution, evaluation, context tracking. Branching logic
+  is unit-tested through injectable seams (`run_evaluation_with`,
+  `run_target_agent_with`, `run_generation_with`) instead of spawning a real
+  interpreter.
+- **Prompt / context** (`prompts.rs`, `context_manager.rs`): the byte-for-byte
+  surfaces. Golden masters live in `tests/golden/` and are checked from
+  `tests/context_golden.rs`, `tests/feedback_context_golden.rs`,
+  `tests/prompts_snapshot.rs`.
+- **Config & providers** (`config.rs`, `config_files.rs`, `providers.rs`,
+  `profiles.rs`, `api_keys.rs`, `env_file.rs`): bundled provider/profile JSON is
+  embedded at build time via `include_dir`. `.env` is loaded at startup (real env
+  vars win); see [docs/CREDENTIALS.md](docs/CREDENTIALS.md).
+- **Agent registry** (`agent_impls/`): `claude`, `openhands`, `pydantic_ai`
+  registration, dispatch, and `resolve_model`. This logic is **shared and
+  identical** across default and `llm` builds.
+- **Native LLM runners** (`src/llm/`, feature `llm`): the actual agentic tool-use
+  loops on `rig-core`/HTTP. Every loop is driven through an **injectable transport**
+  (`MessagesTransport`, `ChatTransport`), so the full loops are tested offline with
+  scripted responses; real-provider tests are `#[ignore]`d and gated on API keys.
+  Without `--features llm`, the runners return a clear "build with `--features llm`"
+  message and everything else still works.
+- **Sandbox** (`sandbox.rs`, on the **default** build): a pure-`std` capability
+  allow-list (`Capabilities` + `check_read`/`check_write`/`check_bash`/…),
+  deny-by-default — the single auditable enforcement point native tool executors
+  consult. Threat model in [SECURITY.md](SECURITY.md).
+- **Web visualizer** (`web/`): an `axum`/`tokio` server rendering the `runs/`
+  directory. `sia web` is fully functional end-to-end.
+- **Serialization helpers** (`pyjson.rs`, `pyfmt.rs`): CPython-compatible JSON /
+  formatting — the foundation of the parity gate. Do not "simplify" these toward
+  idiomatic serde output; they intentionally match Python.
+
+### Conventions specific to this port
+
+- Feature gating: keep the default build dependency-light. New LLM/network code
+  goes behind `feature = "llm"`; the registry/dispatch stays shared.
+- When you add a deterministic output surface, add a golden/parity test for it and
+  wire the Python reference into `scripts/parity_check.py`.
+- Tasks (`tasks/<name>/data/{public,private}/`, `evaluate.py` contract) are
+  unchanged from the Python version — see [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md)
+  and [docs/TASK_AUTHORING.md](docs/TASK_AUTHORING.md).
 
 ### Using bv as an AI sidecar
 
