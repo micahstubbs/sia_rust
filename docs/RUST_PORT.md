@@ -55,6 +55,24 @@ visualizer, prompts, context tracking, evaluation flow, and CLI are fully
 functional. The Python `sia/tasks/` reference agents + evaluators are task *data*
 (read/executed by the agents) and remain unchanged.
 
+## Parity, benchmarks & evals
+
+- **Differential parity** — `scripts/parity_check.py` runs the reference Python
+  implementation and the Rust `sia-parity` helper on the same inputs (json.dumps,
+  meta/feedback prompts, feedback context, execution loading) over an ASCII + CJK +
+  emoji + control-char matrix and asserts byte-identical output. CI runs it on
+  every push. The `src/pyjson.rs` serializer reproduces CPython's
+  `json.dumps(..., ensure_ascii=True)` exactly (needed for LawBench/Chinese).
+- **Benchmarks** — `cargo bench` (Criterion, `benches/core.rs`) and
+  `benchmarks/bench_python.py` measure the same core ops in both languages;
+  `python benchmarks/run_comparison.py` regenerates `benchmarks/REPORT.md`. The
+  Rust port runs the deterministic core **~5.8× faster** (geometric mean) — up to
+  ~25× on prompt building and ~18× on execution-log loading.
+- **Evals** — `evals/` is a standalone crate built on [`dspy-rs`/DSRs](https://github.com/krypticmouse/DSRs)
+  implementing a GPQA-style multiple-choice `Signature` + `Module` + accuracy
+  `Evaluator` with an offline mock adapter (no network/keys) and a real-provider
+  path. Run with `cargo test --manifest-path evals/Cargo.toml`; see `evals/README.md`.
+
 ## Testing seams
 
 Where the Python tests patch `subprocess.run` / `subprocess.Popen`, the Rust port

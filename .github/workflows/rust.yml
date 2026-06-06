@@ -76,3 +76,32 @@ jobs:
 
       - name: Differential parity (Python ⇄ Rust)
         run: python scripts/parity_check.py
+
+  evals:
+    # dsrs (dspy-rs) eval harness — standalone crate, must build + pass offline.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            evals/target
+          key: ${{ runner.os }}-evals-${{ hashFiles('evals/Cargo.lock') }}
+
+      - name: Format check (evals)
+        run: cargo fmt --manifest-path evals/Cargo.toml --all -- --check
+
+      - name: Test evals (offline, no API keys)
+        env:
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+        run: cargo test --manifest-path evals/Cargo.toml
