@@ -46,9 +46,13 @@
 
 mod rig_runner;
 mod trajectory;
+pub mod trajectory_middleware;
 
 pub use rig_runner::RigAgentRunner;
 pub use trajectory::AgentTrajectory;
+pub use trajectory_middleware::{
+    usage_from_rig, RunMetrics, TokenUsage, TrajectoryEvent, TrajectoryMiddleware,
+};
 
 /// Inputs describing how an agent run should be executed.
 #[derive(Debug, Clone)]
