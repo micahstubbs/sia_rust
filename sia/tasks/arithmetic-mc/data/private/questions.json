@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "domain": "Arithmetic",
+    "subdomain": "Addition",
+    "Question": "What is 17 + 26?",
+    "options": {
+      "A": "33",
+      "B": "43",
+      "C": "44",
+      "D": "53"
+    },
+    "correct_answer": "43",
+    "correct_answer_letter": "B"
+  },
+  {
+    "id": 2,
+    "domain": "Arithmetic",
+    "subdomain": "Multiplication",
+    "Question": "What is 12 * 8?",
+    "options": {
+      "A": "86",
+      "B": "92",
+      "C": "96",
+      "D": "108"
+    },
+    "correct_answer": "96",
+    "correct_answer_letter": "C"
+  },
+  {
+    "id": 3,
+    "domain": "Arithmetic",
+    "subdomain": "Subtraction",
+    "Question": "What is 100 - 37?",
+    "options": {
+      "A": "53",
+      "B": "63",
+      "C": "67",
+      "D": "73"
+    },
+    "correct_answer": "63",
+    "correct_answer_letter": "B"
+  },
+  {
+    "id": 4,
+    "domain": "Arithmetic",
+    "subdomain": "Division",
+    "Question": "What is 144 / 12?",
+    "options": {
+      "A": "11",
+      "B": "12",
+      "C": "13",
+      "D": "14"
+    },
+    "correct_answer": "12",
+    "correct_answer_letter": "B"
+  },
+  {
+    "id": 5,
+    "domain": "Arithmetic",
+    "subdomain": "Order of operations",
+    "Question": "What is 2 + 3 * 4?",
+    "options": {
+      "A": "14",
+      "B": "20",
+      "C": "24",
+      "D": "9"
+    },
+    "correct_answer": "14",
+    "correct_answer_letter": "A"
+  }
+]

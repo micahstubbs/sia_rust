@@ -26,6 +26,7 @@ pub mod run;
 pub mod run_setup;
 pub mod sandbox;
 pub mod task_files;
+pub mod verifier;
 pub mod web;
 
 pub use task_files::TaskFiles;
