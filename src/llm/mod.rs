@@ -44,10 +44,18 @@
 //! ergonomic specifically so issue #51's middleware can record full tool-use
 //! loops into the same JSON shape.
 
+pub mod anthropic_api;
+pub mod claude_runner;
 mod rig_runner;
+pub mod tools;
 mod trajectory;
 pub mod trajectory_middleware;
 
+pub use anthropic_api::{
+    ApiMessage, ApiUsage, ContentBlock, HttpMessagesTransport, MessagesRequest, MessagesResponse,
+    MessagesTransport, ToolDef,
+};
+pub use claude_runner::run_claude_agent;
 pub use rig_runner::RigAgentRunner;
 pub use trajectory::AgentTrajectory;
 pub use trajectory_middleware::{
