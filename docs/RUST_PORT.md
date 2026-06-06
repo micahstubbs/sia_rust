@@ -143,3 +143,8 @@ interpreter — same coverage, idiomatic Rust.
 
 - **[docs/NEBIUS_QUICKSTART.md](NEBIUS_QUICKSTART.md)** — Nebius Token Factory: get credentials,
   run a bundled Nebius profile end-to-end, add custom provider/profile JSON, read `telemetry.json`.
+
+## Hackathon demo
+
+- **[docs/HACKATHON_DEMO.md](HACKATHON_DEMO.md)** — time-boxed demo script, per-track judging narrative,
+  graceful-degradation backup paths, Q&A prep, and a pre-demo checklist.
