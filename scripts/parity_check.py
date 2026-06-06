@@ -131,34 +131,43 @@ def test_meta_prompt() -> None:
 
 
 def test_feedback_prompt() -> None:
-    tf, tfd = _tf({"messages": [{"role": "user", "content": "汉字"}]}, cjk=True)
-    py = build_feedback_prompt(
-        current_gen=2,
-        max_gen=3,
-        task_files=tf,
-        agent_py="print('当前实现')",
-        task="# 任务\n预测罪名。",
-        execution_status="成功",
-        execution_section="执行日志",
-        run_dir="/RUN/run_1",
-        next_gen_dir="/RUN/run_1/gen_3",
-        previous_gens="1",
-        task_model="claude-haiku-4-5-20251001",
-    )
-    payload = {
-        "current_gen": 2,
-        "max_gen": 3,
-        "task_files": tfd,
-        "agent_py": "print('当前实现')",
-        "task": "# 任务\n预测罪名。",
-        "execution_status": "成功",
-        "execution_section": "执行日志",
-        "run_dir": "/RUN/run_1",
-        "next_gen_dir": "/RUN/run_1/gen_3",
-        "previous_gens": "1",
-        "task_model": "claude-haiku-4-5-20251001",
-    }
-    check("feedback-prompt/cjk", py, rust("feedback-prompt", payload))
+    matrix = [("cjk", None, None), ("nebius_openai_reqs", "nebius", "/RUN/run_1/gen_3")]
+    for name, provider, reqs in matrix:
+        tf, tfd = _tf({"messages": [{"role": "user", "content": "汉字"}]}, cjk=True)
+        prov = load_provider(provider) if provider else None
+        py = build_feedback_prompt(
+            current_gen=2,
+            max_gen=3,
+            task_files=tf,
+            agent_py="print('当前实现')",
+            task="# 任务\n预测罪名。",
+            execution_status="成功",
+            execution_section="执行日志",
+            run_dir="/RUN/run_1",
+            next_gen_dir="/RUN/run_1/gen_3",
+            previous_gens="1",
+            task_model="claude-haiku-4-5-20251001",
+            provider=prov,
+            requirements_dir=reqs,
+        )
+        payload = {
+            "current_gen": 2,
+            "max_gen": 3,
+            "task_files": tfd,
+            "agent_py": "print('当前实现')",
+            "task": "# 任务\n预测罪名。",
+            "execution_status": "成功",
+            "execution_section": "执行日志",
+            "run_dir": "/RUN/run_1",
+            "next_gen_dir": "/RUN/run_1/gen_3",
+            "previous_gens": "1",
+            "task_model": "claude-haiku-4-5-20251001",
+        }
+        if provider:
+            payload["provider"] = provider
+        if reqs:
+            payload["requirements_dir"] = reqs
+        check(f"feedback-prompt/{name}", py, rust("feedback-prompt", payload))
 
 
 # --------------------------------------------------------------------------- #
@@ -206,6 +215,49 @@ def test_feedback_context() -> None:
         out = json.loads(rust("feedback-context", payload))
         check("feedback-context/cjk-status", status, out["status"])
         check("feedback-context/cjk-section", section, out["section"])
+
+    # Multi-trajectory with CJK content (exercises the trajectory json.dumps path).
+    with tempfile.TemporaryDirectory() as td:
+        gen = Path(td) / "gen_1"
+        ex = gen / "agent_execution"
+        ex.mkdir(parents=True)
+        for i in range(2):
+            (ex / f"execution_q{i}.json").write_text(
+                json.dumps([{"role": "user", "content": f"问题{i}：罪名？"}]), encoding="utf-8"
+            )
+        (gen / "results.json").write_text(json.dumps({"accuracy": 0.8, "类别": "刑法"}), encoding="utf-8")
+        log = str(gen / "target_agent_stdout.log")
+        tf = TaskFiles("desc", "ref", {}, "# Task")
+        status, section = _build_feedback_context(
+            current_gen=1,
+            gen_dir=str(gen),
+            dataset_dir="/data/public",
+            target_agent_success=True,
+            target_agent_error_msg="",
+            target_agent_stdout="处理 q0\n处理 q1\n完成\n",
+            target_agent_stderr="",
+            stdout_log_file=log,
+            task_files=tf,
+        )
+        payload = {
+            "current_gen": 1,
+            "gen_dir": str(gen),
+            "dataset_dir": "/data/public",
+            "success": True,
+            "error_msg": "",
+            "stdout": "处理 q0\n处理 q1\n完成\n",
+            "stderr": "",
+            "stdout_log_file": log,
+            "task_files": {
+                "sample_task_descriptions": "desc",
+                "reference_target_agent_py": "ref",
+                "sample_agent_execution": {},
+                "task_md": "# Task",
+            },
+        }
+        out = json.loads(rust("feedback-context", payload))
+        check("feedback-context/multi-cjk-status", status, out["status"])
+        check("feedback-context/multi-cjk-section", section, out["section"])
 
 
 # --------------------------------------------------------------------------- #
