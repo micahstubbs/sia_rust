@@ -50,6 +50,7 @@ pub mod openai_api;
 pub mod openhands_runner;
 pub mod provider_mapping;
 pub mod pydantic_ai_runner;
+pub mod retry;
 mod rig_runner;
 pub mod tools;
 mod trajectory;
@@ -69,6 +70,10 @@ pub use provider_mapping::{
     api_key_for, base_url_for, chat_transport_for, client_for, messages_transport_for, AgentClient,
 };
 pub use pydantic_ai_runner::run_pydantic_ai_agent;
+pub use retry::{
+    backoff_delay_ms, is_transient_error, run_with_retry, RetryChatTransport,
+    RetryMessagesTransport, RetryPolicy,
+};
 pub use rig_runner::RigAgentRunner;
 pub use trajectory::AgentTrajectory;
 pub use trajectory_middleware::{
