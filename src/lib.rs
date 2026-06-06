@@ -20,6 +20,7 @@ pub mod providers;
 pub mod results;
 pub mod run_setup;
 pub mod task_files;
+pub mod web;
 
 pub use task_files::TaskFiles;
 
