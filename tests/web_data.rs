@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
+use sia::config::Config;
 use sia::web::runs as rd;
 
 fn make_runs_root() -> (tempfile::TempDir, PathBuf) {
@@ -114,6 +115,33 @@ fn test_eval_details_and_artifacts() {
     );
     let improvement = rd::get_artifact_text(&root, "run_7", "gen_2", "improvement").unwrap();
     assert!(improvement.starts_with("# Plan"));
+}
+
+#[test]
+fn test_oversized_artifact_text_is_omitted() {
+    let (_d, root) = make_runs_root();
+    let artifact = root.join("run_7").join("gen_1").join("target_agent.py");
+    std::fs::write(
+        &artifact,
+        vec![b'x'; Config::default().max_context_file_size as usize + 1],
+    )
+    .unwrap();
+
+    assert!(rd::get_artifact_text(&root, "run_7", "gen_1", "target_agent").is_none());
+}
+
+#[test]
+fn test_oversized_telemetry_json_is_omitted() {
+    let (_d, root) = make_runs_root();
+    let telemetry = root.join("run_7").join("gen_1").join("telemetry.json");
+    let padding = "x".repeat(Config::default().max_context_file_size as usize + 1);
+    std::fs::write(
+        &telemetry,
+        serde_json::json!({"cumulative": {"input_tokens": 1}, "padding": padding}).to_string(),
+    )
+    .unwrap();
+
+    assert!(rd::get_generation_telemetry(&root, "run_7", "gen_1").is_none());
 }
 
 #[test]

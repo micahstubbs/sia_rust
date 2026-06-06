@@ -1,6 +1,7 @@
 """Integration tests for generation loop with mocked agents."""
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -119,6 +120,39 @@ def test_run_target_agent_failure(mock_popen_cls, tmp_path):
 
     assert success is False
     assert "exit code 1" in err
+
+
+@patch("sia.orchestrator.subprocess.Popen")
+def test_run_target_agent_timeout_kills_process(mock_popen_cls, tmp_path):
+    """_run_target_agent kills and reports subprocess timeout."""
+    gen_dir = tmp_path / "gen_1"
+    gen_dir.mkdir()
+    stdout_log = str(gen_dir / "stdout.log")
+    (gen_dir / "target_agent.py").write_text("import time; time.sleep(60)")
+
+    mock_process = MagicMock()
+    mock_process.stdout = iter(["partial\n"])
+    mock_process.wait.side_effect = [
+        subprocess.TimeoutExpired(cmd=["python"], timeout=1),
+        -9,
+    ]
+    mock_popen_cls.return_value = mock_process
+
+    success, stdout, _stderr, err = _run_target_agent(
+        venv_dir="/fake/venv",
+        target_agent_path=str(gen_dir / "target_agent.py"),
+        abs_dataset_dir="/data",
+        gen_dir=str(gen_dir),
+        stdout_log_file=stdout_log,
+        sandbox="none",
+        env_config=Config(DOCKER_TIMEOUT=1),
+    )
+
+    assert success is False
+    assert "partial\n" in stdout
+    assert "timed out after 1s" in stdout
+    assert "timed out" in err
+    mock_process.kill.assert_called_once()
 
 
 @patch("sia.orchestrator._run_feedback_agent")

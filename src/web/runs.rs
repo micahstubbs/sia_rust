@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::io_utils::{default_max_bytes, safe_load_json, safe_read_file};
+
 /// Files surfaced as first-class artifacts in the UI (label -> filename), in order.
 pub const TEXT_ARTIFACTS: &[(&str, &str)] = &[
     ("target_agent", "target_agent.py"),
@@ -104,14 +106,11 @@ pub struct RunDetail {
 // Filesystem helpers
 // --------------------------------------------------------------------------- //
 fn read_json(path: &Path) -> Option<Value> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+    safe_load_json(path, default_max_bytes())
 }
 
 fn read_text(path: &Path) -> Option<String> {
-    std::fs::read(path)
-        .ok()
-        .map(|b| String::from_utf8_lossy(&b).into_owned())
+    safe_read_file(path, default_max_bytes())
 }
 
 fn eval_results_path(gen_dir: &Path) -> Option<PathBuf> {

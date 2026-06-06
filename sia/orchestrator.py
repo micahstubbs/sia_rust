@@ -47,6 +47,7 @@ import glob
 import json
 import os
 import subprocess
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -288,7 +289,7 @@ def _print_welcome():
     print(banner)
 
 
-def _stream_to_log(cmd: list[str], stdout_log_file: str) -> int:
+def _stream_to_log(cmd: list[str], stdout_log_file: str, timeout: int) -> int:
     """Run ``cmd``, streaming merged stdout/stderr to the console and a log file.
 
     Returns the process exit code. This is the single place the target agent
@@ -302,10 +303,27 @@ def _stream_to_log(cmd: list[str], stdout_log_file: str) -> int:
             stderr=subprocess.STDOUT,
             text=True,
         )
-        for line in process.stdout:
-            print(line, end="")
-            log_fh.write(line)
-        return process.wait()
+
+        def _pump_stdout() -> None:
+            if process.stdout is None:
+                return
+            for line in process.stdout:
+                print(line, end="")
+                log_fh.write(line)
+                log_fh.flush()
+
+        pump = threading.Thread(target=_pump_stdout, daemon=True)
+        pump.start()
+        try:
+            return process.wait(timeout=max(1, timeout))
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            pump.join(timeout=1)
+            log_fh.write(f"Target agent timed out after {timeout}s and was killed.\n")
+            raise
+        finally:
+            pump.join(timeout=1)
 
 
 def _run_target_agent_sandboxed(
@@ -344,7 +362,7 @@ def _run_target_agent_sandboxed(
         "/work",
     ]
 
-    return _stream_to_log(docker_cmd, stdout_log_file)
+    return _stream_to_log(docker_cmd, stdout_log_file, config.DOCKER_TIMEOUT)
 
 
 def _run_target_agent(
@@ -374,7 +392,7 @@ def _run_target_agent(
             )
         else:
             cmd = [python_exec, "-u", target_agent_path, "--dataset_dir", abs_dataset_dir, "--working_dir", gen_dir]
-            return_code = _stream_to_log(cmd, stdout_log_file)
+            return_code = _stream_to_log(cmd, stdout_log_file, env_config.DOCKER_TIMEOUT)
 
         with open(stdout_log_file, encoding="utf-8") as f:
             stdout = f.read()
@@ -390,6 +408,16 @@ def _run_target_agent(
             logger.info("  ✓ Target agent execution completed successfully")
             return TargetAgentResult(True, stdout, "", "").as_tuple()
 
+    except subprocess.TimeoutExpired:
+        error_msg = f"Target agent timed out after {env_config.DOCKER_TIMEOUT}s"
+        logger.error(f"  ✗ {error_msg}")
+        stdout = ""
+        try:
+            with open(stdout_log_file, encoding="utf-8") as f:
+                stdout = f.read()
+        except OSError:
+            pass
+        return TargetAgentResult(False, stdout, "", error_msg).as_tuple()
     except FileNotFoundError:
         logger.error(f"  ✗ Target agent file not found: {target_agent_path}")
         logger.error("  → Cannot continue.")

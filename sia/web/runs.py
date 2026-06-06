@@ -30,6 +30,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from sia.io_utils import safe_load_json, safe_read_file
+
 # Files we surface as first-class artifacts in the UI (label -> filename).
 TEXT_ARTIFACTS: dict[str, str] = {
     "target_agent": "target_agent.py",
@@ -123,18 +125,11 @@ class RunDetail(BaseModel):
 # Filesystem helpers
 # --------------------------------------------------------------------------- #
 def _read_json(path: Path) -> Any | None:
-    try:
-        with path.open(encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return None
+    return safe_load_json(path)
 
 
 def _read_text(path: Path) -> str | None:
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+    return safe_read_file(path)
 
 
 def _eval_results_path(gen_dir: Path) -> Path | None:

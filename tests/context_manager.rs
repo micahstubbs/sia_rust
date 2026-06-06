@@ -116,6 +116,28 @@ fn test_finalize_with_metrics() {
 }
 
 #[test]
+fn test_finalize_without_metrics_reports_no_best_performance() {
+    let (_d, root) = run_dir_with_gen1();
+    let mut cm = ContextManager::new(root.to_str().unwrap(), full_config(), None);
+    cm.initialize();
+    let gen_dir = root.join("gen_1");
+    cm.add_generation(
+        1,
+        &gen_data(
+            &gen_dir.join("target_agent.py"),
+            &gen_dir,
+            "2025-01-01 00:00:00",
+        ),
+    );
+
+    cm.finalize();
+
+    let content = std::fs::read_to_string(root.join("context.md")).unwrap();
+    assert!(content.contains("**Best Performance**: N/A"));
+    assert!(!content.contains("-inf"));
+}
+
+#[test]
 fn test_multiple_generations_track_deltas() {
     let (_d, root) = run_dir_with_gen1();
     let mut cm = ContextManager::new(root.to_str().unwrap(), full_config(), None);

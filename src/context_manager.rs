@@ -200,8 +200,8 @@ impl ContextManager {
         };
 
         let successful = self.generations.iter().filter(|g| g.success).count();
-        let best_gen_label = best_gen
-            .map(|g| g.gen_num.to_string())
+        let best_performance = best_gen
+            .map(|g| format!("Generation {} ({best_metric:.2}% accuracy)", g.gen_num))
             .unwrap_or_else(|| "N/A".to_string());
 
         let growth_lines = last_gen.agent_stats.lines as i64 - first_gen.agent_stats.lines as i64;
@@ -211,7 +211,7 @@ impl ContextManager {
             "## Summary Statistics\n\n\
 **Total Generations**: {total}\n\
 **Successful Executions**: {successful}\n\
-**Best Performance**: Generation {best_label} ({best_metric:.2}% accuracy)\n\n\
+**Best Performance**: {best_performance}\n\n\
 **Evolution**:\n\
 - {evolution_text}\n\n\
 **Code Growth**:\n\
@@ -220,8 +220,7 @@ impl ContextManager {
 - Growth: {growth_lines} lines ({growth_bytes} bytes)\n",
             total = self.generations.len(),
             successful = successful,
-            best_label = best_gen_label,
-            best_metric = best_metric,
+            best_performance = best_performance,
             evolution_text = evolution_text,
             first_lines = first_gen.agent_stats.lines,
             first_size = commas_u64(first_gen.agent_stats.size),
