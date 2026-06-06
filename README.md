@@ -103,5 +103,6 @@ the native LLM-runner design, parity/benchmarks/evals, and testing seams.
 - [docs/NEBIUS_QUICKSTART.md](docs/NEBIUS_QUICKSTART.md) — Nebius Token Factory quickstart (GPU credits + hosted models).
 - [docs/HACKATHON_DEMO.md](docs/HACKATHON_DEMO.md) — hackathon demo script, judging narrative & run-of-show.
 - [docs/HACKATHON_DECK.md](docs/HACKATHON_DECK.md) — slide deck outline (7 slides, talking points, one-liners) + reproducibility one-pager.
+- [docs/paper/sia_rust_preprint.md](docs/paper/sia_rust_preprint.md) — preprint-style draft paper on the native Rust re-implementation & extensions (system/experience report).
 - [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) — tasks, MLE-Bench, the `evaluate.py` contract.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common issues.
