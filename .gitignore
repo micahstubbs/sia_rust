@@ -219,3 +219,5 @@ runs
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/**
+docs/paper/sia_rust-pages/
+docs/paper/archive/
