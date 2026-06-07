@@ -348,8 +348,13 @@ function currentRoute() {
 // Cache run details and track what's currently mounted so navigation only
 // re-renders the part that actually changed (no full-page flicker on tab clicks).
 const RUN_CACHE = {};
-const VIEW = { pillsRow: null, genHost: null, tabsBar: null, genBody: null };
+const VIEW = { pillsRow: null, genHost: null, tabsBar: null, genBody: null,
+  telePanel: null, metricsHost: null, schedHost: null };
 let MOUNTED = { run: null, gen: null, tab: null };
+// Generations of the currently-mounted run, used by the live poll to detect
+// when a new generation appears (or an existing one changes) so it can rebuild
+// the pills / overview without disturbing the user's selected gen, tab, scroll.
+let MOUNTED_GENS = null;
 
 async function route() {
   const { run } = currentRoute();
@@ -374,6 +379,14 @@ async function route() {
 
   if (MOUNTED.run !== run) { renderRun(detail); MOUNTED = { run, gen: null, tab: null }; }
   mountGen(detail);
+  MOUNTED_GENS = genSignature(detail.generations);
+}
+
+// Compact signature of the generation list: name + accuracy of each gen. The
+// live poll compares this against the freshly-fetched detail to decide whether
+// anything user-visible (a new gen, a fresh eval) actually changed.
+function genSignature(gens) {
+  return (gens || []).map(g => `${g.name}:${g.eval?.accuracy_percent ?? ""}`).join("|");
 }
 
 // Flatten a (possibly nested) object into [dotted-key, value] rows, skipping
@@ -439,12 +452,14 @@ function renderRun(run) {
 
   const telePanel = h("div", {});
   main.append(telePanel);
+  VIEW.telePanel = telePanel;
   loadTelemetryPanel(run.name, telePanel);
 
   const metricsHost = h("div", { class: "gen-chart" },
     h("div", { class: "k muted" }, "PERFORMANCE VS GENERATION"),
     h("div", { class: "spinner" }, "Loading metrics…"));
   main.append(metricsHost);
+  VIEW.metricsHost = metricsHost;
   loadMetricsChart(run.name, metricsHost, run.generations);
 
   // Run-level scheduler decision timeline (#85): the harness-vs-weight choices
@@ -454,6 +469,7 @@ function renderRun(run) {
     h("div", { class: "k muted" }, "SCHEDULER DECISIONS"),
     h("div", { class: "spinner" }, "Loading scheduler decisions…"));
   main.append(schedHost);
+  VIEW.schedHost = schedHost;
   loadSchedulerTimeline(run.name, schedHost);
 
   VIEW.pillsRow = h("div", { class: "pill-row" });
@@ -926,7 +942,91 @@ async function tabTrajectories({ run, gen, body }) {
   load();
 }
 
-boot();
+// ---- Live auto-refresh during active runs (#110) ----------------------------
+// The runs directory is written to disk by a live `sia run`; there is no
+// push/SSE channel, so the dashboard polls on a short interval and re-fetches
+// the file-backed artifacts. Refreshes are throttled when the tab is hidden and
+// are careful to preserve the user's selected generation, tab, and scroll
+// position — only the parts that actually changed get re-rendered.
+const LIVE_POLL_MS = 4000;
+let livePollTimer = null;
+
+function liveScheduleNext(delay = LIVE_POLL_MS) {
+  if (livePollTimer) clearTimeout(livePollTimer);
+  // Don't burn cycles while the tab is in the background; visibilitychange
+  // re-arms the loop (with an immediate tick) when the user comes back.
+  if (document.visibilityState === "hidden") return;
+  livePollTimer = setTimeout(livePoll, delay);
+}
+
+async function livePoll() {
+  livePollTimer = null;
+  try {
+    await refreshSidebar();
+    await refreshCurrentRun();
+  } catch {
+    /* transient fetch error: ignore and try again on the next tick */
+  } finally {
+    liveScheduleNext();
+  }
+}
+
+// Re-fetch the run list and rebuild the sidebar when new run_* directories
+// appear (or a run's best-accuracy badge changes), preserving the active item.
+async function refreshSidebar() {
+  let runs;
+  try { runs = await api("/api/runs"); }
+  catch { return; }
+  if (!Array.isArray(runs)) return;
+  const sig = (rs) => rs.map(r => `${r.name}:${r.best_accuracy_percent ?? ""}:${r.num_generations ?? ""}`).join("|");
+  if (sig(runs) === sig(RUNS)) return;
+  RUNS = runs;
+  renderSidebar();
+}
+
+// Re-fetch the active run's detail (busting the cache so updated artifacts are
+// re-read) and refresh the live panels + generation list in place.
+async function refreshCurrentRun() {
+  const { run } = currentRoute();
+  if (!run || MOUNTED.run !== run) return;
+
+  let detail;
+  try { detail = await api(`/api/runs/${run}`); }
+  catch { return; }
+  // Bust the stale cached detail so subsequent navigation re-reads fresh data.
+  RUN_CACHE[run] = detail;
+
+  // Always refresh the run-level live panels — they fold in the latest
+  // telemetry / metrics / scheduler decisions and rebuild their own host
+  // contents, so an in-place reload doesn't disturb selection or scroll.
+  if (VIEW.telePanel) loadTelemetryPanel(run, VIEW.telePanel);
+  if (VIEW.metricsHost) loadMetricsChart(run, VIEW.metricsHost, detail.generations);
+  if (VIEW.schedHost) loadSchedulerTimeline(run, VIEW.schedHost);
+
+  // If the generation set changed (a new gen appeared, or an eval landed),
+  // rebuild the pills + generation view. mountGen() only re-renders the parts
+  // that changed and keeps the user's selected gen/tab via the hash route.
+  const sig = genSignature(detail.generations);
+  if (sig !== MOUNTED_GENS) {
+    // A genuinely new generation can change which one is "latest"; if the user
+    // hadn't explicitly picked a gen, let mountGen re-evaluate the default.
+    const { gen } = currentRoute();
+    const known = detail.generations.some(g => g.name === gen);
+    // Force the overview body to re-render so a freshly-landed eval shows up,
+    // but leave other (artifact) tabs alone to avoid yanking the user around.
+    if (MOUNTED.tab === "overview" || !known) MOUNTED.tab = null;
+    if (!known) MOUNTED.gen = null;
+    mountGen(detail);
+    MOUNTED_GENS = sig;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") liveScheduleNext(0);
+  else if (livePollTimer) { clearTimeout(livePollTimer); livePollTimer = null; }
+});
+
+boot().then(() => liveScheduleNext());
 </script>
 </body>
 </html>
