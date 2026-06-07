@@ -328,26 +328,41 @@ fn test_run_evaluation_honors_injected_timeout() {
 #[cfg(unix)]
 #[test]
 fn test_run_evaluation_timeout_kills_child_process() {
+    use std::os::unix::fs::PermissionsExt;
     let d = tmp();
     let gen_dir = d.path().join("gen_1");
     std::fs::create_dir(&gen_dir).unwrap();
     let task_dir = d.path().join("task");
     make_task_with_eval(&task_dir);
-    let evaluate_script = task_dir.join("data").join("public").join("evaluate.py");
-    std::fs::write(
-        &evaluate_script,
-        r#"
-import pathlib
-import sys
-import time
 
-gen_dir = pathlib.Path(sys.argv[sys.argv.index("--gen-dir") + 1])
-time.sleep(2)
-(gen_dir / "late_marker.txt").write_text("late")
-"#,
+    // Deterministic, interpreter-independent "python": a POSIX shell script that
+    // sleeps well past the eval timeout, then — only if it is NOT killed first —
+    // writes a late marker into --gen-dir. The previous version `exec`'d a real
+    // python3 and raced its cold-start against the 1s deadline, which made this
+    // test flaky on loaded CI runners (python could exit/fail fast, yielding a
+    // non-timeout error). A shell `sleep` starts in milliseconds and is reliable.
+    let venv = d.path().join("venv");
+    let bin = venv.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let python = bin.join("python");
+    std::fs::write(
+        &python,
+        "#!/bin/sh\n\
+gendir=\"\"\n\
+while [ $# -gt 0 ]; do\n\
+  case \"$1\" in\n\
+    --gen-dir) gendir=\"$2\"; shift 2 ;;\n\
+    *) shift ;;\n\
+  esac\n\
+done\n\
+sleep 5\n\
+[ -n \"$gendir\" ] && printf 'late' > \"$gendir/late_marker.txt\"\n",
     )
     .unwrap();
-    let venv = make_fake_venv(d.path());
+    let mut perms = std::fs::metadata(&python).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&python, perms).unwrap();
+
     let cfg = Config {
         eval_timeout: 1,
         ..Config::default()
