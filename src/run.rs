@@ -36,6 +36,47 @@ pub fn resolve_runs_dir(flag: Option<&str>) -> String {
     }
 }
 
+/// Resolve the `--run_id` argument to a concrete numeric run id.
+///
+/// `"auto"` (case-insensitive) scans `runs_root` for existing `run_<n>` directories
+/// and returns `max(n) + 1`, or `1` when there are none. This makes rehearsals and
+/// restarts collision-proof: each `auto` run lands in a fresh directory rather than
+/// erroring on an existing one. Any other value must parse as a positive integer and
+/// is returned as-is (preserving the historical numeric behavior, including the
+/// existing-directory collision error in `setup_run_directory`).
+pub fn resolve_run_id(arg: &str, runs_root: &str) -> SiaResult<i64> {
+    if arg.eq_ignore_ascii_case("auto") {
+        return Ok(next_free_run_id(runs_root));
+    }
+    match arg.parse::<i64>() {
+        Ok(n) if n >= 1 => Ok(n),
+        _ => Err(SiaError::new(format!(
+            "Invalid --run_id '{arg}': expected a positive integer or 'auto'"
+        ))),
+    }
+}
+
+/// Scan `runs_root` for `run_<n>` directories and return the next free id
+/// (`max(n) + 1`, or `1` if the root is missing/empty). Non-`run_<n>` entries and
+/// entries with non-numeric suffixes are ignored.
+fn next_free_run_id(runs_root: &str) -> i64 {
+    let mut max_id: i64 = 0;
+    if let Ok(entries) = std::fs::read_dir(runs_root) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if let Some(suffix) = name.strip_prefix("run_") {
+                if let Ok(n) = suffix.parse::<i64>() {
+                    if n > max_id {
+                        max_id = n;
+                    }
+                }
+            }
+        }
+    }
+    max_id + 1
+}
+
 /// `sia web`: serve the runs visualizer (blocks).
 pub fn run_web(args: &ArgMatches) -> SiaResult<()> {
     let host = opt_str(args, "host").unwrap_or("127.0.0.1");
@@ -59,7 +100,6 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
     let max_gen = *args
         .get_one::<i64>("max_gen")
         .unwrap_or(&env_config.default_max_generations);
-    let run_id = *args.get_one::<i64>("run_id").unwrap_or(&1);
     let sandbox = opt_str(args, "sandbox")
         .unwrap_or(&env_config.sandbox_mode)
         .to_string();
@@ -67,7 +107,16 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
     let (task_dir, shared_dir) =
         resolve_task_dir(opt_str(args, "task"), opt_str(args, "task_dir"))?;
 
+    // Resolve the runs root first, then resolve `--run_id` (which may be `auto`)
+    // against that same root so the auto-scan and the directory the run writes to
+    // agree (honors `--runs-dir` / `SIA_RUNS_DIR`).
     let runs_dir = resolve_runs_dir(opt_str(args, "runs_dir"));
+    let run_id = resolve_run_id(opt_str(args, "run_id").unwrap_or("1"), &runs_dir)?;
+
+    // Surface the resolved run directory up front, before any expensive LLM work,
+    // so a presenter immediately sees where artifacts will land.
+    let resolved_run_dir = RunLayout::for_run_id(run_id, &runs_dir).run_dir;
+    println!("Run directory: {resolved_run_dir}");
 
     // Live dashboard in the background unless disabled. It serves exactly the
     // directory the run writes to (`runs_dir`). The listener is bound up front so
@@ -237,4 +286,73 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
         run_setup.run_directory
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_run_id_passes_through() {
+        // A custom runs root with no entries does not affect numeric ids.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        assert_eq!(resolve_run_id("1", root).unwrap(), 1);
+        assert_eq!(resolve_run_id("7", root).unwrap(), 7);
+    }
+
+    #[test]
+    fn invalid_run_id_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        assert!(resolve_run_id("0", root).is_err());
+        assert!(resolve_run_id("-1", root).is_err());
+        assert!(resolve_run_id("nope", root).is_err());
+    }
+
+    #[test]
+    fn auto_picks_one_when_root_empty_or_missing() {
+        // Missing root.
+        assert_eq!(resolve_run_id("auto", "/no/such/runs/root").unwrap(), 1);
+        // Existing-but-empty root.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        assert_eq!(resolve_run_id("auto", root).unwrap(), 1);
+        assert_eq!(resolve_run_id("AUTO", root).unwrap(), 1);
+    }
+
+    #[test]
+    fn auto_picks_next_free_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("run_1")).unwrap();
+        assert_eq!(
+            resolve_run_id("auto", root.to_str().unwrap()).unwrap(),
+            2,
+            "auto should pick run_2 when run_1 exists"
+        );
+
+        // Gaps and non-run entries are ignored; auto uses max + 1.
+        std::fs::create_dir(root.join("run_5")).unwrap();
+        std::fs::create_dir(root.join("not_a_run")).unwrap();
+        std::fs::create_dir(root.join("run_abc")).unwrap();
+        assert_eq!(resolve_run_id("auto", root.to_str().unwrap()).unwrap(), 6);
+    }
+
+    #[test]
+    fn auto_resolves_under_custom_runs_dir() {
+        // Two independent roots: auto resolves against whichever root it is given.
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        std::fs::create_dir(a.path().join("run_3")).unwrap();
+        // Root `a` has run_3 -> auto picks 4; root `b` is empty -> auto picks 1.
+        assert_eq!(
+            resolve_run_id("auto", a.path().to_str().unwrap()).unwrap(),
+            4
+        );
+        assert_eq!(
+            resolve_run_id("auto", b.path().to_str().unwrap()).unwrap(),
+            1
+        );
+    }
 }

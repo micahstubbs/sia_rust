@@ -39,14 +39,15 @@ export NEBIUS_API_KEY="<your-token-factory-key>"
 # Optional (only needed if using default-meta / Claude-backed meta agent):
 # export ANTHROPIC_API_KEY="<your-anthropic-key>"
 
-# 3a. Warm the STAGE-SAFE run (this is what you run live; warming it now both
-#     primes the provider/venv caches and gives sia web something to show).
+# 3a. Warm the STAGE-SAFE run (what you run live; warming it primes provider/venv
+#     caches and gives sia web something to show). --run_id auto picks the next
+#     free run_<n>, so a second rehearsal never collides with an existing dir.
 cargo run --release --features llm -- run \
   --task arithmetic-mc \
   --meta-agent-profile kimi-nebius-meta \
   --target-agent-profile kimi-nebius-target \
   --max_gen 2 \
-  --run_id 0
+  --run_id auto
 
 # 3b. (Optional, research/credibility path) Pre-record a GPQA run for the
 #     offline `sia web` replay — slow (198 questions, minutes per generation),
@@ -60,6 +61,12 @@ cargo run --release --features llm -- run \
 
 # 4. Open browser to http://127.0.0.1:8000 and confirm the dashboard loads
 ```
+
+> Tip: `--run_id auto` scans the runs root (honoring `--runs-dir` / `SIA_RUNS_DIR`)
+> and lands in the next free `run_<n>`. The orchestrator prints
+> `Run directory: ./runs/run_<n>` up front, before any LLM work, so you always know
+> where artifacts will land. Use a fixed `--run_id N` only when you deliberately want
+> a specific directory; it still errors if that directory already exists.
 
 ---
 
@@ -98,7 +105,7 @@ cargo run --release --features llm -- run \
   --meta-agent-profile kimi-nebius-meta \
   --target-agent-profile kimi-nebius-target \
   --max_gen 2 \
-  --run_id 1
+  --run_id auto
 ```
 
 > Runtime: dominated by per-generation provider latency, not the task itself (only
@@ -112,8 +119,9 @@ cargo run --release --features llm -- run \
 > command, because its 198 per-question provider calls make it minutes per
 > generation and unreliable for a timed slot.
 
-> Point at: the structured log lines as each generation starts. Then flip to the
-> browser at `http://127.0.0.1:8000`.
+> Point at: the `Run directory: ./runs/run_<n>` line printed first (so the room sees
+> where artifacts land), then the structured log lines as each generation starts.
+> Then flip to the browser at `http://127.0.0.1:8000`.
 
 > Note: `sia run` starts the SIA Studio dashboard automatically on
 > `http://127.0.0.1:8000` unless `--no-web` is passed. You do not need a separate
@@ -124,8 +132,9 @@ cargo run --release --features llm -- run \
 - The SIA Studio dashboard at `http://127.0.0.1:8000` — generations appear as they
   land, the accuracy chart climbs, and the telemetry panel shows token counts and
   wall-clock timing updating in real time.
-- Point at the `/api/runs/run_1/metrics` and `/api/runs/run_1/telemetry` endpoints
-  powering the charts (show the JSON in a second tab if you have time).
+- Point at the `/api/runs/run_<n>/metrics` and `/api/runs/run_<n>/telemetry`
+  endpoints powering the charts — substitute the `run_<n>` the orchestrator printed
+  at startup (show the JSON in a second tab if you have time).
 
 #### 2:30 – 3:00 · Safety + extensibility story
 
@@ -236,12 +245,13 @@ cargo run --release --features llm -- run \
   --meta-agent-profile kimi-nebius-meta \
   --target-agent-profile kimi-nebius-target \
   --max_gen 2 \
-  --run_id 1
+  --run_id auto
 ```
 
-Live dashboard auto-starts at `http://127.0.0.1:8000`. (GPQA — `--task gpqa
---max_gen 3` — is the research path; pre-warm it and show it via the offline
-`sia web` replay rather than running it live, since it is minutes per generation.)
+Live dashboard auto-starts at `http://127.0.0.1:8000`. `--run_id auto` keeps repeated
+rehearsals collision-free and the resolved `Run directory:` is printed at startup.
+(GPQA — `--task gpqa --max_gen 3` — is the research path; pre-warm it and show it via
+the offline `sia web` replay rather than running it live, since it is minutes per generation.)
 
 ---
 
@@ -259,9 +269,9 @@ cargo run --release -- web --runs-dir ./runs-prerecorded
 Browse to `http://127.0.0.1:8000`. All charts, telemetry, artifacts, and
 per-generation diffs are served from disk — no network, no API key needed.
 
-> What to show: open `run_0` from the warm-up, walk through gens 1–3, show the
-> accuracy chart climbing, click into `target_agent.py` for each generation to show
-> the literal code changes between generations.
+> What to show: open the warm-up run (the `run_<n>` printed at startup) and walk
+> through gens 1–3, show the accuracy chart climbing, click into `target_agent.py`
+> for each generation to show the literal code changes between generations.
 
 ---
 
@@ -305,7 +315,7 @@ formal capability allow-list, and a real-time web dashboard built into the binar
 - Feature-gated: `--features llm` for full stack; default build has no LLM deps
 
 **Live demo** (stage-safe: tiny `arithmetic-mc` task)
-`cargo run --release --features llm -- run --task arithmetic-mc --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 2 --run_id 1`
+`cargo run --release --features llm -- run --task arithmetic-mc --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 2 --run_id auto`
 Watch accuracy climb in the SIA Studio dashboard at `http://127.0.0.1:8000`. (GPQA is the slower research-path benchmark — pre-warm and replay it.)
 
 **Results**
@@ -386,8 +396,8 @@ agents.
 
 ### Warm run (run before you walk on stage)
 
-- [ ] **Stage-safe path:** `cargo run --release --features llm -- run --task arithmetic-mc --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 2 --run_id 0` completed
-- [ ] `runs/run_0/gen_1/`, `gen_2/` directories exist with artifacts
+- [ ] **Stage-safe path:** `cargo run --release --features llm -- run --task arithmetic-mc --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 2 --run_id auto` completed (note the `Run directory:` it prints)
+- [ ] `runs/run_<n>/gen_1/`, `gen_2/` directories exist with artifacts
 - [ ] **Note the measured wall-clock of the stage-safe run here on the demo machine:** ______ (confirm it fits the 3-4 minute slot)
 - [ ] (Optional, research path) Pre-record GPQA: `... --task gpqa ... --max_gen 3 --run_id 9` completed for the offline `sia web` replay — do NOT run GPQA live
 - [ ] Copy `runs/` to `runs-prerecorded/` as the Path B fallback
@@ -395,7 +405,7 @@ agents.
 ### Dashboard
 
 - [ ] `cargo run --release -- web` starts and `http://127.0.0.1:8000` loads in browser
-- [ ] `run_0` visible in the UI; accuracy chart renders; telemetry panel shows data
+- [ ] The warm-up `run_<n>` visible in the UI; accuracy chart renders; telemetry panel shows data
 - [ ] Dark mode confirmed
 
 ### Terminal
