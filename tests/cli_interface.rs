@@ -63,6 +63,17 @@ fn test_web_help_exposes_server_flags() {
 }
 
 #[test]
+fn test_run_help_lists_arithmetic_mc_task() {
+    let out = sia(&["run", "--help"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("arithmetic-mc"),
+        "run --help should list arithmetic-mc as a --task value"
+    );
+}
+
+#[test]
 fn test_no_args_exits_nonzero() {
     assert!(!sia(&[]).status.success());
 }

@@ -209,4 +209,31 @@ mod tests {
         assert_eq!(sub, "run");
         assert_eq!(sm.get_one::<String>("task").unwrap(), "gpqa");
     }
+
+    #[test]
+    fn test_arithmetic_mc_task_parses() {
+        let cfg = Config::default();
+        let m = parse_args(
+            &cfg,
+            &["run".into(), "--task".into(), "arithmetic-mc".into()],
+        )
+        .unwrap();
+        let (sub, sm) = m.subcommand().unwrap();
+        assert_eq!(sub, "run");
+        assert_eq!(sm.get_one::<String>("task").unwrap(), "arithmetic-mc");
+    }
+
+    #[test]
+    fn test_run_help_lists_arithmetic_mc() {
+        let cfg = Config::default();
+        let help = build_parser(&cfg)
+            .find_subcommand_mut("run")
+            .expect("run subcommand")
+            .render_help()
+            .to_string();
+        assert!(
+            help.contains("arithmetic-mc"),
+            "run --help should list arithmetic-mc as a possible --task value"
+        );
+    }
 }
