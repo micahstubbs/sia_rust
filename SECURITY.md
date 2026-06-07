@@ -13,10 +13,12 @@ clear threat model, a lexical filesystem sandbox in the native tool layer, an
 optional Docker jail for the Python target agent, and a pure-`std` **capability
 allow-list** (`src/sandbox.rs`) that gives tool executors a single, auditable
 enforcement point — now with **structured security-event surfacing** so capability
-violations flow into the trajectory the Feedback Agent reads, and an optional
+violations flow into the trajectory the Feedback Agent reads, an optional
 **kernel-enforced Landlock filesystem layer** (`landlock-sandbox` feature, Linux,
-graceful no-op elsewhere). The remaining kernel-/VM-level enforcement (seccomp
-network filtering, WASI) is the documented roadmap, not yet shipped.
+graceful no-op elsewhere), and an optional **seccomp network-egress filter**
+(`seccomp-sandbox` feature, Linux, graceful no-op elsewhere) that blocks internet
+socket creation when network is denied. The remaining VM-level enforcement (WASI) is
+the documented roadmap, not yet shipped.
 
 ---
 
@@ -153,8 +155,34 @@ not be able to reach the assets in §1 beyond an explicit, declared allow-list.*
   default** (the default and `llm` builds pull in no new dependency) and
   **degrades to a logged no-op** on non-Linux targets, on kernels without
   Landlock, and when the feature is disabled — it never errors and never breaks a
-  run or the CI runner. The companion seccomp network filter (to block raw socket
-  syscalls when `allow_network` is false) remains roadmap (see §6).
+  run or the CI runner.
+- **OS-level seccomp network-egress filter (`src/sandbox.rs`, feature
+  `seccomp-sandbox` — issue #140).** On Linux, when `caps.allow_network` is false,
+  `seccomp_support::apply_network_filter(&caps)` installs a
+  [seccompiler](https://crates.io/crates/seccompiler) (rust-vmm / Firecracker)
+  seccomp-bpf filter on the calling thread that **denies internet socket creation**.
+  - **Blocked:** `socket(AF_INET, …)` and `socket(AF_INET6, …)` — the egress
+    chokepoint. The matched action is `Errno(EACCES)`, so the syscall returns a
+    normal "permission denied" rather than killing the process with `SIGSYS`.
+    Denying internet socket *creation* is sufficient to block egress: `connect` /
+    `sendto` / `sendmsg` cannot run without an internet socket fd.
+  - **Allowed:** everything else. The filter's default action is `Allow`, so the
+    Python target child and all non-network syscalls (including `AF_UNIX` local IPC,
+    which parts of the Python runtime use) run normally. We deliberately do **not**
+    attempt a full syscall allow-list — that would break the interpreter.
+  Like Landlock, this is kernel-enforced (it survives a logic bug / prompt-injection
+  that bypasses the in-process allow-list), returns a `SandboxStatus`
+  (`Enforced` / `NotSupported`), and **degrades to a logged no-op** off Linux, on
+  kernels without seccomp (runtime-probed — install failure is caught), and when the
+  feature is disabled. When `allow_network` is true it is a no-op (nothing to
+  confine). It is **off by default** (the default and `llm` builds pull in no new
+  dependency) and, like `landlock-sandbox`, is **not built in CI** — verified
+  locally. `Capabilities::apply_network_filter_logged` is the observable entry point:
+  it applies the filter and records a `network_filter_apply` `SecurityEvent` whose
+  outcome is `denied` when egress is now kernel-blocked and `allowed` otherwise (the
+  status tag is carried in `detail`), so the decision flows into the trajectory /
+  telemetry. **Still deferred:** the WASI component model (see §6), and wiring
+  `apply_network_filter` into the live runner startup.
 
 ### Honest limitations (today)
 
@@ -169,9 +197,13 @@ not be able to reach the assets in §1 beyond an explicit, declared allow-list.*
   `landlock-sandbox` feature (Linux only) but is **not wired into the live native
   tool loop yet** — `landlock_support::apply` is the enforcement *primitive*;
   calling it at runner startup is the next integration step.
-- The Landlock layer covers **filesystem** access only. Network egress is still
-  unconfined at the OS level (no seccomp filter yet), so a process with network
-  authority can still exfiltrate; use `--sandbox docker --network none` for that.
+- The Landlock layer covers **filesystem** access only; the companion seccomp
+  network-egress filter (feature `seccomp-sandbox`) covers network. Both are
+  enforcement *primitives* that are **not yet wired into the live runner startup**,
+  and the seccomp filter blocks only internet socket *creation* (an `AF_UNIX`
+  abstract-namespace path or an already-open inherited socket fd is out of scope).
+  For untrusted tasks, prefer `--sandbox docker --network none`, which confines the
+  full target subprocess regardless of these features.
 - `--sandbox none` is the default and offers no confinement for the target agent.
 - The Claude SDK runner path uses `permission_mode="bypassPermissions"` (see §7),
   trading interactive approval for automation.
@@ -184,15 +216,19 @@ ignore it:
 
 1. **Capability allow-list — shipped.** `src/sandbox.rs`. Pure `std`, advisory,
    in-process; the policy source of truth.
-2. **OS sandboxing for native execution — partially shipped.** On Linux, the
-   [`landlock`](https://crates.io/crates/landlock) filesystem half is **implemented**
-   in `src/sandbox.rs` (`landlock_support::apply`) behind the non-default
-   `landlock-sandbox` cargo feature, so the default/`llm` builds gain no dependency.
-   It scopes a kernel-enforced ruleset to `fs_root` (unprivileged, per-thread) and
-   degrades to a logged no-op off Linux / on kernels without Landlock. **Still
-   planned:** wiring `apply` into the live runner startup, and the `seccomp` syscall
-   filter (e.g. [`seccompiler`](https://crates.io/crates/seccompiler)) to block raw
-   network syscalls when `allow_network` is false.
+2. **OS sandboxing for native execution — shipped (behind features).** On Linux,
+   both halves are **implemented** in `src/sandbox.rs`, each behind its own
+   non-default cargo feature so the default/`llm` builds gain no dependency:
+   - the [`landlock`](https://crates.io/crates/landlock) **filesystem** ruleset
+     (`landlock_support::apply`, feature `landlock-sandbox`) scopes a kernel-enforced
+     ruleset to `fs_root` (unprivileged, per-thread);
+   - the [`seccompiler`](https://crates.io/crates/seccompiler) **seccomp
+     network-egress filter** (`seccomp_support::apply_network_filter`, feature
+     `seccomp-sandbox`) blocks internet socket creation
+     (`socket(AF_INET/AF_INET6, …)` → `EACCES`) when `allow_network` is false, while
+     allowing every other syscall so the Python child runs normally.
+   Both degrade to a logged no-op off Linux / on unsupported kernels. **Still
+   planned:** wiring both `apply` calls into the live runner startup.
 3. **WASI component model — planned.** Run untrusted generated agents as WebAssembly
    components under [`wasmtime`](https://crates.io/crates/wasmtime) with
    [`wasi`](https://crates.io/crates/wasi) preview2 capabilities: only explicit
