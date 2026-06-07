@@ -8,7 +8,13 @@ use std::path::{Component, Path, PathBuf};
 use crate::error::{SiaError, SiaResult};
 
 /// Tasks that ship with the framework under `sia/tasks/<name>/`.
-pub const BUNDLED_TASKS: &[&str] = &["gpqa", "lawbench", "longcot-chess", "spaceship-titanic"];
+pub const BUNDLED_TASKS: &[&str] = &[
+    "arithmetic-mc",
+    "gpqa",
+    "lawbench",
+    "longcot-chess",
+    "spaceship-titanic",
+];
 
 /// Every filename / relative-path literal used by a run or a task.
 pub mod names {
