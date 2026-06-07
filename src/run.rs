@@ -70,11 +70,31 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
     let runs_dir = resolve_runs_dir(opt_str(args, "runs_dir"));
 
     // Live dashboard in the background unless disabled. It serves exactly the
-    // directory the run writes to (`runs_dir`).
+    // directory the run writes to (`runs_dir`). The listener is bound up front so
+    // we only announce the URL after a successful bind, and the printed URL always
+    // reflects the port we actually bound to (which may differ from the default
+    // when 8000 is occupied).
     if !args.get_flag("no_web") {
         let web_host = opt_str(args, "web_host").unwrap_or("127.0.0.1");
         let web_port = *args.get_one::<u16>("web_port").unwrap_or(&8000);
-        crate::web::serve_in_background(web_host, web_port, &runs_dir);
+        // Did the user explicitly pass --web-port? If so, treat a bind failure as
+        // a hard error; otherwise auto-select a fallback port.
+        let explicit_port = matches!(
+            args.value_source("web_port"),
+            Some(clap::parser::ValueSource::CommandLine)
+        );
+        match crate::web::serve_in_background(web_host, web_port, &runs_dir, explicit_port) {
+            Ok(dashboard) => {
+                println!("Live dashboard: http://{web_host}:{}", dashboard.port);
+            }
+            Err(e) if explicit_port => {
+                return Err(e);
+            }
+            Err(e) => {
+                // Default port path that exhausted all fallbacks: warn but keep running.
+                eprintln!("Warning: live dashboard unavailable: {e}");
+            }
+        }
     }
 
     let meta_profile =
