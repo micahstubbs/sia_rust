@@ -41,7 +41,7 @@ use serde_json::{json, Value};
 use crate::layout::{names, RunLayout};
 use crate::scheduler::{AdaptiveScheduler, GenerationRecord, SchedulerConfig, UpdateKind};
 use crate::weights::{
-    extract_training_examples, LoraReferenceUpdater, WeightUpdateConfig, WeightUpdateOutcome,
+    extract_training_examples, StubWeightUpdater, WeightUpdateConfig, WeightUpdateOutcome,
     WeightUpdater,
 };
 
@@ -366,7 +366,10 @@ pub fn maybe_run_weight_update(
     let trajectory = load_trajectory(layout, current_gen)?;
 
     let examples = extract_training_examples(&trajectory, reward);
-    let mut updater = LoraReferenceUpdater::new(config.clone());
+    // Default-build backend (issue #139): the dependency-free stub. A
+    // `--features weight-updates` build can swap this for `CandleLoRAWeightUpdater`
+    // with no other change here — both implement `WeightUpdater`.
+    let mut updater = StubWeightUpdater::new(config.clone());
     let outcome = updater.update(&examples);
 
     let artifact = json!({
