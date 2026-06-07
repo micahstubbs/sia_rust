@@ -159,9 +159,10 @@ handles rate limits so a 10-generation run finishes unattended."
   covers the full tool-use loops (`claude`/`openhands`/`pydantic-ai`),
   sandbox policy, trajectory middleware, and retry logic, all with scripted
   offline responses. No live API call required to prove the architecture.
-- **Tasks:** four bundled tasks ship (`gpqa`, `lawbench`, `longcot-chess`,
-  `spaceship-titanic`); the `evaluate.py` scoring contract is unchanged from
-  the paper's experiments.
+- **Tasks:** five bundled tasks ship (`arithmetic-mc`, `gpqa`, `lawbench`,
+  `longcot-chess`, `spaceship-titanic`); `arithmetic-mc` is the tiny, fast
+  stage-safe demo task, while `gpqa` is the research benchmark. The `evaluate.py`
+  scoring contract is unchanged from the paper's experiments.
 - **Telemetry:** per-generation machine-readable artifacts (`telemetry.json`,
   `agent_execution.json`) ready for downstream research analysis.
 
@@ -257,7 +258,26 @@ credential setup guide.
 
 ### Step 3 — Run a self-improvement loop
 
-The canonical demo command (Kimi on Nebius as both meta and target agent):
+**Stage-safe live command** (Kimi on Nebius as both meta and target agent). Uses
+the tiny bundled `arithmetic-mc` task (5 self-contained questions, no dataset
+download) so a full multi-generation cycle finishes inside a 3-4 minute demo slot:
+
+```bash
+cargo run --features llm -- run \
+  --meta-agent-profile kimi-nebius-meta \
+  --target-agent-profile kimi-nebius-target \
+  --task arithmetic-mc \
+  --max_gen 2 \
+  --run_id 1
+```
+
+> Runtime is dominated by per-generation provider latency, not the 5-question task.
+> **Measure the exact wall-clock on the demo machine** during warm-up; do not quote
+> an unmeasured figure.
+
+For the **research/credibility path**, GPQA is the headline benchmark — but it has
+198 per-question provider calls (minutes per generation), so run it as a pre-warmed
+/ offline `cargo run -- web` replay, **not** live:
 
 ```bash
 cargo run --features llm -- run \
@@ -265,7 +285,7 @@ cargo run --features llm -- run \
   --target-agent-profile kimi-nebius-target \
   --task gpqa \
   --max_gen 3 \
-  --run_id 1
+  --run_id 9
 ```
 
 **All flags explained:**
@@ -275,8 +295,8 @@ cargo run --features llm -- run \
 | `--features llm` | (cargo flag) | Include native LLM runners |
 | `--meta-agent-profile` | `kimi-nebius-meta` | Meta/feedback agent: Kimi K2.6 via OpenHands runner on Nebius |
 | `--target-agent-profile` | `kimi-nebius-target` | Target agent profile: Kimi K2.6 on Nebius |
-| `--task` | `gpqa` | Bundled task (`gpqa`, `lawbench`, `longcot-chess`, `spaceship-titanic`) |
-| `--max_gen` | `3` | Number of improvement generations to run |
+| `--task` | `arithmetic-mc` | Bundled task. Stage-safe live demo: `arithmetic-mc` (tiny, fast). Others: `gpqa` (research path, slow), `lawbench`, `longcot-chess`, `spaceship-titanic` |
+| `--max_gen` | `2` | Number of improvement generations to run |
 | `--run_id` | `1` | Identifier for this run; outputs land in `runs/run_1/` |
 
 **Optional flags:**
@@ -296,20 +316,10 @@ cargo run --features llm -- run \
 --runs-dir ./my-runs        # or: SIA_RUNS_DIR=./my-runs cargo run -- run ...
 ```
 
-**To run the `arithmetic-mc` example task** (ships with the verifier examples):
-
-```bash
-cargo run --features llm -- run \
-  --meta-agent-profile kimi-nebius-meta \
-  --target-agent-profile kimi-nebius-target \
-  --task arithmetic-mc \
-  --max_gen 3 \
-  --run_id 2
-```
-
 > **Note on `--task` values:** Only the bundled task names are accepted by the
-> `--task` flag. Pass `--task_dir ./path/to/my-task` to use an external task
-> directory.
+> `--task` flag (`arithmetic-mc`, `gpqa`, `lawbench`, `longcot-chess`,
+> `spaceship-titanic`). `arithmetic-mc` is the tiny stage-safe demo task shown in
+> Step 3; pass `--task_dir ./path/to/my-task` to use an external task directory.
 
 ---
 
@@ -337,12 +347,16 @@ artifact diffs are served from disk.
   first run (dependency compilation); subsequent incremental builds are fast.
 - **A generation** is the time for one meta → target → feedback cycle.
   Wall-clock time depends primarily on the LLM provider's latency and the
-  task's evaluation script. For a cloud-hosted model (e.g. Kimi on Nebius),
-  a typical generation on `gpqa` with `--max_gen 3` is bounded by network
-  round-trips to the provider plus the Python subprocess runtime — expect
-  minutes per generation, not seconds. The deterministic orchestration core
-  (prompt building, context management, log loading) contributes negligibly
-  (~milliseconds) compared to LLM latency.
+  task's evaluation script. On `gpqa` (198 questions, per-question provider
+  calls) expect **minutes per generation** — which is why GPQA is the
+  pre-warmed / offline-replay research path, not the live stage command. The
+  stage-safe `arithmetic-mc` task has only 5 questions, so a full generation is
+  dominated by a handful of provider round-trips and a short Python subprocess,
+  landing a 2-generation run inside a 3-4 minute slot. **Measure the exact
+  wall-clock on the demo machine during warm-up — do not quote an unmeasured
+  number.** The deterministic orchestration core (prompt building, context
+  management, log loading) contributes negligibly (~milliseconds) compared to
+  LLM latency.
 - **Token telemetry** in `runs/run_<id>/gen_<n>/telemetry.json` records
   `duration_ms` per generation so you can observe actual timing after the
   first warm-up run.
@@ -437,8 +451,9 @@ backup if the live run is slow.
 
 ### Warmed `runs/` directory
 
-- [ ] Complete a `--max_gen 3` warm-up run before the event and keep the
-      output in `runs/run_0/`
+- [ ] Complete the stage-safe `--task arithmetic-mc --max_gen 2` warm-up run
+      before the event and keep the output in `runs/run_0/` (this is the run you
+      perform live); note its measured wall-clock on the demo machine
 - [ ] Copy to `runs-prerecorded/` so `sia web --runs-dir ./runs-prerecorded`
       works without overwriting it:
       ```bash
