@@ -96,6 +96,14 @@ fn add_run_args(cmd: Command, env_config: &Config) -> Command {
             .default_value("127.0.0.1")
             .help("Host for the live dashboard (default: 127.0.0.1)."),
     )
+    .arg(
+        Arg::new("runs_dir")
+            .long("runs-dir")
+            .help(
+                "Directory where run artifacts are written and served from \
+                 (default: ./runs, or the $SIA_RUNS_DIR env var).",
+            ),
+    )
 }
 
 fn add_web_args(cmd: Command) -> Command {
