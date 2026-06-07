@@ -46,8 +46,8 @@ dev = [
 sia = "sia.orchestrator:main"
 
 [project.urls]
-Homepage = "https://github.com/hexo-ai/sia"
-Repository = "https://github.com/hexo-ai/sia"
+Homepage = "https://github.com/micahstubbs/sia_rust"
+Repository = "https://github.com/micahstubbs/sia_rust"
 
 [tool.setuptools.packages.find]
 include = ["sia*"]
