@@ -39,13 +39,24 @@ export NEBIUS_API_KEY="<your-token-factory-key>"
 # Optional (only needed if using default-meta / Claude-backed meta agent):
 # export ANTHROPIC_API_KEY="<your-anthropic-key>"
 
-# 3. Warm a runs/ directory (so sia web has something to show immediately)
+# 3a. Warm the STAGE-SAFE run (this is what you run live; warming it now both
+#     primes the provider/venv caches and gives sia web something to show).
+cargo run --release --features llm -- run \
+  --task arithmetic-mc \
+  --meta-agent-profile kimi-nebius-meta \
+  --target-agent-profile kimi-nebius-target \
+  --max_gen 2 \
+  --run_id 0
+
+# 3b. (Optional, research/credibility path) Pre-record a GPQA run for the
+#     offline `sia web` replay — slow (198 questions, minutes per generation),
+#     so do this well before stage time, never live.
 cargo run --release --features llm -- run \
   --task gpqa \
   --meta-agent-profile kimi-nebius-meta \
   --target-agent-profile kimi-nebius-target \
   --max_gen 3 \
-  --run_id 0
+  --run_id 9
 
 # 4. Open browser to http://127.0.0.1:8000 and confirm the dashboard loads
 ```
@@ -75,17 +86,31 @@ cargo build --release --features llm
 
 #### 1:00 – 2:30 · Live self-improvement run
 
-Run in terminal (or run this live if confident; otherwise switch to the pre-warmed
-run in the next section):
+**Stage-safe live command — run this on stage.** Use the tiny bundled
+`arithmetic-mc` task (5 self-contained questions, no dataset download): a full
+generation cycle — meta-agent rewrite, target-agent subprocess run, scoring,
+feedback — completes fast, so a 2-generation run lands inside the demo window
+instead of GPQA's minutes-per-generation, 198-question grind.
 
 ```bash
 cargo run --release --features llm -- run \
-  --task gpqa \
+  --task arithmetic-mc \
   --meta-agent-profile kimi-nebius-meta \
   --target-agent-profile kimi-nebius-target \
-  --max_gen 3 \
+  --max_gen 2 \
   --run_id 1
 ```
+
+> Runtime: dominated by per-generation provider latency, not the task itself (only
+> 5 questions). On a warm machine with the Nebius profiles this lands well inside
+> the 3-4 minute slot. **Exact wall-clock is to be measured on the demo machine** —
+> run it during the pre-demo warm-up (§7) and note the number; do not quote a
+> figure you have not measured here.
+
+> GPQA is the research/credibility path — keep it for the pre-warmed run shown in
+> the next section (or an offline `cargo run -- web` replay), not the live stage
+> command, because its 198 per-question provider calls make it minutes per
+> generation and unreliable for a timed slot.
 
 > Point at: the structured log lines as each generation starts. Then flip to the
 > browser at `http://127.0.0.1:8000`.
@@ -118,10 +143,13 @@ cargo run --release --features llm -- run \
 
 #### 3:00 – 3:30 · Results + ask
 
-> "Three generations on GPQA Diamond — with a hosted open-source model on Nebius
-> Token Factory, zero local GPU, ~5.8× faster orchestration core than the Python
-> reference. The web UI works offline too: `cargo run -- web` replays any prior
-> `runs/` directory, so you can demo anywhere.
+> "What you just saw live was the tiny `arithmetic-mc` task — a full
+> self-improvement cycle in seconds. For research credibility, here's three
+> generations on GPQA Diamond [flip to the pre-warmed GPQA run in the offline `sia
+> web` replay] — with a hosted open-source model on Nebius Token Factory, zero
+> local GPU, ~5.8× faster orchestration core than the Python reference. The web UI
+> works offline too: `cargo run -- web` replays any prior `runs/` directory, so you
+> can demo anywhere.
 >
 > We're looking for: feedback on the safety story, interest in research
 > collaborations on the paper extensions (adaptive harness scheduling, weight
@@ -149,9 +177,10 @@ cargo run --release --features llm -- run \
 
 ### Applied
 
-- **Runnable tasks out of the box.** Four bundled tasks ship with the crate: `gpqa`,
-  `lawbench`, `longcot-chess`, `spaceship-titanic`. A single `cargo run --features
-  llm -- run --task gpqa ...` is the entire demo command.
+- **Runnable tasks out of the box.** Five bundled tasks ship with the crate:
+  `arithmetic-mc`, `gpqa`, `lawbench`, `longcot-chess`, `spaceship-titanic`. A single
+  `cargo run --features llm -- run --task arithmetic-mc ...` is the entire stage-safe
+  demo command (tiny, fast); `gpqa` is the slower research benchmark.
 - **Verifier trait + native evaluation hooks** (`src/verifier.rs`, issue #66, merged):
   `ExactMatch`, `MultipleChoice`, `NumericTolerance`, `Contains` verifiers with
   partial-credit scoring and adversarial-variant / stability hooks for Goodhart
@@ -198,19 +227,21 @@ All items in this section are **in-progress / roadmap** — not yet merged to `m
 
 ## 4. Backup demo paths (graceful degradation)
 
-### Path A (happy path) — live run on Nebius
+### Path A (happy path) — stage-safe live run on Nebius
 
 ```bash
 export NEBIUS_API_KEY="..."
 cargo run --release --features llm -- run \
-  --task gpqa \
+  --task arithmetic-mc \
   --meta-agent-profile kimi-nebius-meta \
   --target-agent-profile kimi-nebius-target \
-  --max_gen 3 \
+  --max_gen 2 \
   --run_id 1
 ```
 
-Live dashboard auto-starts at `http://127.0.0.1:8000`.
+Live dashboard auto-starts at `http://127.0.0.1:8000`. (GPQA — `--task gpqa
+--max_gen 3` — is the research path; pre-warm it and show it via the offline
+`sia web` replay rather than running it live, since it is minutes per generation.)
 
 ---
 
@@ -273,9 +304,9 @@ formal capability allow-list, and a real-time web dashboard built into the binar
 - SIA Studio: telemetry + metrics charts + dark mode, zero external deploy
 - Feature-gated: `--features llm` for full stack; default build has no LLM deps
 
-**Live demo**
-`cargo run --release --features llm -- run --task gpqa --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 3 --run_id 1`
-Watch accuracy climb in the SIA Studio dashboard at `http://127.0.0.1:8000`.
+**Live demo** (stage-safe: tiny `arithmetic-mc` task)
+`cargo run --release --features llm -- run --task arithmetic-mc --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 2 --run_id 1`
+Watch accuracy climb in the SIA Studio dashboard at `http://127.0.0.1:8000`. (GPQA is the slower research-path benchmark — pre-warm and replay it.)
 
 **Results**
 - All 7 golden-master parity tests pass (byte-identical vs. Python reference)
@@ -355,8 +386,10 @@ agents.
 
 ### Warm run (run before you walk on stage)
 
-- [ ] `cargo run --release --features llm -- run --task gpqa --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 3 --run_id 0` completed
-- [ ] `runs/run_0/gen_1/`, `gen_2/`, `gen_3/` directories exist with artifacts
+- [ ] **Stage-safe path:** `cargo run --release --features llm -- run --task arithmetic-mc --meta-agent-profile kimi-nebius-meta --target-agent-profile kimi-nebius-target --max_gen 2 --run_id 0` completed
+- [ ] `runs/run_0/gen_1/`, `gen_2/` directories exist with artifacts
+- [ ] **Note the measured wall-clock of the stage-safe run here on the demo machine:** ______ (confirm it fits the 3-4 minute slot)
+- [ ] (Optional, research path) Pre-record GPQA: `... --task gpqa ... --max_gen 3 --run_id 9` completed for the offline `sia web` replay — do NOT run GPQA live
 - [ ] Copy `runs/` to `runs-prerecorded/` as the Path B fallback
 
 ### Dashboard
