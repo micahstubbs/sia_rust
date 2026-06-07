@@ -23,16 +23,28 @@
 //!    ([`crate::weights::extract_training_examples`]), runs the CPU reference
 //!    LoRA ([`crate::weights::LoraReferenceUpdater`]), and writes
 //!    `<gen_dir>/weight_update.json` with the before/after loss.
+//! 3. [`record_acted_decision`] (issue #90) annotates
+//!    `<gen_dir>/scheduler_decision.json` with the [`ActedDecision`] the
+//!    orchestrator actually executed and the weight-update summary, so the loop
+//!    surfaces what it *did*, not just what it recommended.
 //!
-//! # Hard invariant: purely additive
+//! # Closing the loop (issue #90)
 //!
-//! Nothing here mutates any pre-existing deterministic output (prompts,
-//! `context.md`, feedback context, `results.json`, `improvement.md`). Every
-//! function is panic-free and degrades to `None` / a no-op when inputs are
-//! missing, so the orchestrator's existing tests (which drive
-//! `run_generation_with` with mock fns and no telemetry/trajectory) are
-//! unaffected. The only observable additions are the two new JSON files and a
-//! console log line.
+//! Through #84 this module was **observational** — it only wrote artifacts and a
+//! log line. As of #90 the orchestrator *acts* on the decision via
+//! [`action_for_decision`]: a `weight` decision runs the weight update and
+//! short-circuits the feedback (harness) step for that generation, `both` runs
+//! both, and `harness` keeps today's behavior.
+//!
+//! The control-flow change is gated on a decision actually being produced.
+//! [`record_scheduler_decision`] still degrades to `None` when inputs are missing
+//! (no score yet, no telemetry/trajectory), and the orchestrator maps a missing
+//! decision to the harness path — so its existing tests (which drive
+//! `run_generation_with` with mock fns and no `results.json`) are unaffected and
+//! the default path stays byte-for-byte as before. Every function here remains
+//! panic-free and never mutates a pre-existing deterministic output
+//! (`context.md`, the parity-checked feedback context, `results.json`); the only
+//! additions are the JSON artifacts and the acted-decision keys.
 
 use std::path::Path;
 
@@ -391,6 +403,117 @@ pub fn maybe_run_weight_update(
     Some(outcome)
 }
 
+// --------------------------------------------------------------------------- //
+// 3. Acting on the decision (issue #90)
+// --------------------------------------------------------------------------- //
+
+/// What the orchestrator actually *did* this generation in response to the
+/// scheduler decision — issue #90 closes the loop so the recommendation drives
+/// real control flow instead of only being recorded.
+///
+/// `harness` runs the meta/feedback harness update (today's behavior); `weight`
+/// runs the weight update and **skips** the harness/feedback step; `both` runs
+/// both. The variant is derived from the scheduler decision by
+/// [`action_for_decision`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActedDecision {
+    /// Run the harness (meta/feedback) update only.
+    Harness,
+    /// Run the weight update only; skip the harness/feedback step.
+    Weight,
+    /// Run both the weight update and the harness update.
+    Both,
+}
+
+impl ActedDecision {
+    /// Stable lower-case label for the artifact / logs.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActedDecision::Harness => "harness",
+            ActedDecision::Weight => "weight",
+            ActedDecision::Both => "both",
+        }
+    }
+
+    /// Whether the harness (meta/feedback) update should run for this decision.
+    pub fn runs_harness(self) -> bool {
+        matches!(self, ActedDecision::Harness | ActedDecision::Both)
+    }
+
+    /// Whether the weight update should run for this decision.
+    pub fn runs_weight(self) -> bool {
+        matches!(self, ActedDecision::Weight | ActedDecision::Both)
+    }
+}
+
+/// Map a scheduler `decision` string to the action the loop takes.
+///
+/// `"weight"` -> [`ActedDecision::Weight`], `"both"` -> [`ActedDecision::Both`],
+/// and **anything else** (including `"harness"`, an unknown spelling, or an empty
+/// string) -> [`ActedDecision::Harness`]. Defaulting unknown decisions to harness
+/// keeps the safe, cheap lever as the fallback and preserves today's behavior
+/// when no usable decision is present.
+pub fn action_for_decision(decision: &str) -> ActedDecision {
+    match decision {
+        "weight" => ActedDecision::Weight,
+        "both" => ActedDecision::Both,
+        _ => ActedDecision::Harness,
+    }
+}
+
+/// Annotate this generation's `scheduler_decision.json` with what the loop
+/// **acted** on (issue #90), so SIA Studio and `improvement.md` can show the
+/// action taken — not just the recommendation.
+///
+/// Adds keys to the existing artifact (leaving the parity-checked recommendation
+/// fields untouched):
+///
+/// * `acted` — `"harness" | "weight" | "both"`, the lever actually pulled.
+/// * `harness_ran` / `weight_ran` — booleans for the two levers.
+/// * `weight_update` — a compact `{ updated, num_examples, loss_before,
+///   loss_after }` summary when a weight update ran, else `null`.
+///
+/// Best-effort: if the artifact is missing/unparseable it writes a fresh object
+/// carrying just the acted fields; any IO error is swallowed. Never panics.
+pub fn record_acted_decision(
+    layout: &RunLayout,
+    current_gen: i64,
+    acted: ActedDecision,
+    weight_outcome: Option<&WeightUpdateOutcome>,
+) {
+    if current_gen < 0 {
+        return;
+    }
+    let gen_dir = layout.gen_dir(current_gen);
+    let out_path = Path::new(&gen_dir).join(SCHEDULER_DECISION_JSON);
+
+    let mut artifact = match read_json(&out_path) {
+        Some(v @ Value::Object(_)) => v,
+        _ => json!({ "generation": current_gen }),
+    };
+
+    let weight_summary = match weight_outcome {
+        Some(o) => json!({
+            "updated": o.updated,
+            "num_examples": o.num_examples,
+            "loss_before": o.loss_before,
+            "loss_after": o.loss_after,
+        }),
+        None => Value::Null,
+    };
+
+    if let Some(obj) = artifact.as_object_mut() {
+        obj.insert("acted".to_string(), Value::from(acted.as_str()));
+        obj.insert("harness_ran".to_string(), Value::from(acted.runs_harness()));
+        obj.insert("weight_ran".to_string(), Value::from(acted.runs_weight()));
+        obj.insert("weight_update".to_string(), weight_summary);
+    }
+
+    if let Ok(text) = serde_json::to_string_pretty(&artifact) {
+        let _ = std::fs::write(&out_path, text);
+    }
+}
+
 /// Load a single trajectory for the generation: prefer the single
 /// `agent_execution.json`, else the first `execution_q*.json` in the
 /// `agent_execution/` directory. Returns `None` if neither parses.
@@ -650,5 +773,77 @@ mod tests {
         let v =
             record_scheduler_decision(&layout, 2, &SchedulerConfig::default()).expect("decision");
         assert_eq!(v["decision"], json!("harness"));
+    }
+
+    // -- Acting on the decision (issue #90) ------------------------------------
+
+    #[test]
+    fn action_for_decision_maps_each_lever_and_defaults_to_harness() {
+        assert_eq!(action_for_decision("weight"), ActedDecision::Weight);
+        assert_eq!(action_for_decision("both"), ActedDecision::Both);
+        assert_eq!(action_for_decision("harness"), ActedDecision::Harness);
+        // Unknown / empty spellings fall back to the cheap, safe harness lever.
+        assert_eq!(action_for_decision("nonsense"), ActedDecision::Harness);
+        assert_eq!(action_for_decision(""), ActedDecision::Harness);
+    }
+
+    #[test]
+    fn acted_decision_lever_flags() {
+        assert!(ActedDecision::Harness.runs_harness());
+        assert!(!ActedDecision::Harness.runs_weight());
+        assert!(!ActedDecision::Weight.runs_harness());
+        assert!(ActedDecision::Weight.runs_weight());
+        assert!(ActedDecision::Both.runs_harness());
+        assert!(ActedDecision::Both.runs_weight());
+    }
+
+    #[test]
+    fn record_acted_decision_annotates_existing_artifact() {
+        // Seed an existing recommendation artifact, then record what we acted on.
+        let (_d, layout) = make_run(&[0.5]);
+        let v =
+            record_scheduler_decision(&layout, 0, &SchedulerConfig::default()).expect("decision");
+        // Pretend we ran a `both` action with a weight outcome.
+        let outcome = WeightUpdateOutcome {
+            num_examples: 2,
+            loss_before: 0.5,
+            loss_after: 0.25,
+            updated: true,
+            details: "test".to_string(),
+        };
+        record_acted_decision(&layout, 0, ActedDecision::Both, Some(&outcome));
+
+        let path = Path::new(&layout.gen_dir(0)).join(SCHEDULER_DECISION_JSON);
+        let on_disk = read_json(&path).unwrap();
+        // Original recommendation fields are preserved.
+        assert_eq!(on_disk["decision"], v["decision"]);
+        // Acted fields are added.
+        assert_eq!(on_disk["acted"], json!("both"));
+        assert_eq!(on_disk["harness_ran"], json!(true));
+        assert_eq!(on_disk["weight_ran"], json!(true));
+        assert_eq!(on_disk["weight_update"]["updated"], json!(true));
+        assert_eq!(on_disk["weight_update"]["num_examples"], json!(2));
+        assert_eq!(on_disk["weight_update"]["loss_after"], json!(0.25));
+    }
+
+    #[test]
+    fn record_acted_decision_without_artifact_writes_fresh_object() {
+        // No prior scheduler_decision.json (e.g. harness with no weight outcome).
+        let (_d, layout) = make_run(&[0.4]);
+        record_acted_decision(&layout, 0, ActedDecision::Harness, None);
+        let path = Path::new(&layout.gen_dir(0)).join(SCHEDULER_DECISION_JSON);
+        let on_disk = read_json(&path).unwrap();
+        assert_eq!(on_disk["acted"], json!("harness"));
+        assert_eq!(on_disk["harness_ran"], json!(true));
+        assert_eq!(on_disk["weight_ran"], json!(false));
+        assert!(on_disk["weight_update"].is_null());
+    }
+
+    #[test]
+    fn record_acted_decision_negative_gen_is_noop() {
+        let d = tempfile::tempdir().unwrap();
+        let layout = RunLayout::new(d.path().join("run_x").to_string_lossy().into_owned());
+        // Must not panic and must not create anything.
+        record_acted_decision(&layout, -1, ActedDecision::Weight, None);
     }
 }

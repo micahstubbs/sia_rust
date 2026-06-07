@@ -32,7 +32,7 @@
 //! exactly the quantity a harness-vs-weight policy wants to compare. See
 //! [`AdaptiveScheduler::improvement_efficiency`].
 //!
-//! # Integration seam (wired observationally; decision branching is future work)
+//! # Integration seam (now drives the loop — issue #90)
 //!
 //! As of #84, [`crate::orchestrator::run_generation_with`] calls
 //! [`crate::closed_loop::record_scheduler_decision`] after each generation,
@@ -49,12 +49,15 @@
 //!   efficiently compute is being converted into score and what the scheduler
 //!   recommends next.
 //!
-//! The current wiring is **observational**: the decision artifact is written each
-//! generation, but [`AdaptiveScheduler::decide_next`] does not yet branch the
-//! loop (i.e. harness-vs-weight choice is recorded but not acted on). Closing
-//! that loop — threading the decision into the improvement prompt /
-//! `improvement.md` for the next gen directory ([`crate::orchestrator::next_gen_dir`])
-//! — is tracked as a scheduler-drives-loop follow-up.
+//! As of #90 the wiring is no longer merely observational: the orchestrator
+//! derives an [`crate::closed_loop::ActedDecision`] from the recorded decision
+//! and branches the per-generation action on it — `harness` runs the
+//! meta/feedback update (today's behavior), `weight` runs a weight update and
+//! short-circuits the feedback step, and `both` runs both. The acted decision +
+//! weight-update outcome are written back into `scheduler_decision.json` (read by
+//! SIA Studio / [`crate::web`]) and threaded into the feedback context for the
+//! next generation. When no decision is produced (e.g. no score yet), the loop
+//! defaults to the harness path, identical to the pre-#90 behavior.
 //!
 //! # Heuristic, by design
 //!

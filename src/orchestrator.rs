@@ -775,29 +775,66 @@ pub fn run_generation_with(
     // Run evaluation (if evaluate.py exists).
     let _ = run_evaluation(&gen_dir, dataset_dir, &run_setup.venv_dir, env_config);
 
-    // Closed-loop step (#84): record the adaptive scheduler's harness-vs-weight
-    // decision for this generation and, when it recommends weights, run an
-    // observable CPU-reference weight update. Purely additive and best-effort —
-    // it only writes NEW artifacts + a log line, guards every failure, and never
-    // affects this function's control flow or return value.
-    {
-        let decision = crate::closed_loop::record_scheduler_decision(
+    // Closed-loop step (#84, made to ACT on the decision in #90): record the
+    // adaptive scheduler's harness-vs-weight decision for this generation, then
+    // branch the per-generation action on it:
+    //
+    //   * `harness` -> run the meta/feedback harness update (today's behavior),
+    //   * `weight`  -> run the weight update and SKIP the feedback step, and
+    //   * `both`    -> do both.
+    //
+    // Backward-compat is preserved by deriving the action from the decision and
+    // defaulting to harness whenever there is no usable decision (the default in
+    // every existing test, where no `results.json` is produced so
+    // `record_scheduler_decision` returns `None`): in that case the harness path
+    // runs and the feedback agent is invoked exactly as before. The acted
+    // decision + weight outcome are recorded back into `scheduler_decision.json`
+    // (read by SIA Studio / `web::runs`) and threaded into the feedback context
+    // for the next generation.
+    let decision = crate::closed_loop::record_scheduler_decision(
+        &layout,
+        current_gen,
+        &crate::scheduler::SchedulerConfig::default(),
+    );
+    // No decision (or an unreadable one) -> default to the harness path so the
+    // behavior is identical to before #90.
+    let decision_kind = decision
+        .as_ref()
+        .and_then(|d| d.get("decision").and_then(|v| v.as_str()))
+        .map(str::to_string);
+    let acted =
+        crate::closed_loop::action_for_decision(decision_kind.as_deref().unwrap_or("harness"));
+
+    let weight_outcome = if acted.runs_weight() {
+        crate::closed_loop::maybe_run_weight_update(
             &layout,
             current_gen,
-            &crate::scheduler::SchedulerConfig::default(),
+            acted.as_str(),
+            &crate::weights::WeightUpdateConfig::default(),
+        )
+    } else {
+        None
+    };
+
+    // Persist what we actually acted on (additive keys on the existing artifact)
+    // and surface it. Only when a decision exists, so the no-scheduler default
+    // path writes nothing new and stays byte-for-byte as before.
+    if decision.is_some() {
+        crate::closed_loop::record_acted_decision(
+            &layout,
+            current_gen,
+            acted,
+            weight_outcome.as_ref(),
         );
-        if let Some(d) = &decision {
-            if let Some(kind) = d.get("decision").and_then(|v| v.as_str()) {
-                let _ = crate::closed_loop::maybe_run_weight_update(
-                    &layout,
-                    current_gen,
-                    kind,
-                    &crate::weights::WeightUpdateConfig::default(),
-                );
-                let rationale = d.get("rationale").and_then(|v| v.as_str()).unwrap_or("");
-                println!("[scheduler] gen {current_gen}: decision={kind} — {rationale}");
-            }
-        }
+        let rationale = decision
+            .as_ref()
+            .and_then(|d| d.get("rationale").and_then(|v| v.as_str()))
+            .unwrap_or("");
+        println!(
+            "[scheduler] gen {current_gen}: decision={} acted={} — {rationale}",
+            decision_kind.as_deref().unwrap_or("harness"),
+            acted.as_str(),
+        );
     }
 
     // Add generation to context.
@@ -825,8 +862,11 @@ pub fn run_generation_with(
         },
     );
 
-    if current_gen < max_gen {
-        let (execution_status, execution_section) = build_feedback_context(
+    // The harness (feedback) step runs unless the scheduler's acted decision was
+    // a pure `weight` update (issue #90): a `weight` generation short-circuits
+    // the feedback agent for this generation; `harness` and `both` still run it.
+    if current_gen < max_gen && acted.runs_harness() {
+        let (execution_status, mut execution_section) = build_feedback_context(
             current_gen,
             &gen_dir,
             dataset_dir,
@@ -838,6 +878,17 @@ pub fn run_generation_with(
             task_files,
             env_config,
         );
+        // Thread the acted decision + weight-update outcome into the feedback
+        // context for the next generation. Appended ONLY when a decision exists,
+        // so `build_feedback_context`'s parity-checked output is untouched on the
+        // default/no-scheduler path.
+        if decision.is_some() {
+            execution_section.push_str(&format_scheduler_feedback_section(
+                acted,
+                weight_outcome.as_ref(),
+                decision.as_ref(),
+            ));
+        }
         let next_gen = current_gen + 1;
         let next_gen_directory = layout.gen_dir(next_gen);
         feedback_fn(&FeedbackArgs {
@@ -851,6 +902,41 @@ pub fn run_generation_with(
     }
 
     Ok(())
+}
+
+/// Render a short feedback-context addendum describing the scheduler decision the
+/// loop **acted** on this generation and any weight-update outcome (issue #90).
+///
+/// This is only ever appended to the feedback `execution_section` when a
+/// scheduler decision was produced, so it never perturbs the parity-checked
+/// [`build_feedback_context`] output on the default/no-scheduler path.
+fn format_scheduler_feedback_section(
+    acted: crate::closed_loop::ActedDecision,
+    weight_outcome: Option<&crate::weights::WeightUpdateOutcome>,
+    decision: Option<&Value>,
+) -> String {
+    let rationale = decision
+        .and_then(|d| d.get("rationale").and_then(Value::as_str))
+        .unwrap_or("");
+    let recommended = decision
+        .and_then(|d| d.get("recommended_next").and_then(Value::as_str))
+        .unwrap_or(acted.as_str());
+
+    let weight_line = match weight_outcome {
+        Some(o) => format!(
+            "- Weight update: {} example(s), loss {:.6} -> {:.6} (updated: {}).\n",
+            o.num_examples, o.loss_before, o.loss_after, o.updated,
+        ),
+        None => "- Weight update: not run this generation.\n".to_string(),
+    };
+
+    format!(
+        "\n\n**ADAPTIVE SCHEDULER DECISION**:\n\n\
+- Acted on: {acted} (recommended next: {recommended}).\n\
+{weight_line}\
+- Rationale: {rationale}\n",
+        acted = acted.as_str(),
+    )
 }
 
 /// Run the feedback agent to create an improved target agent (real wiring).
