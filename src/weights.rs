@@ -1,4 +1,25 @@
-//! Native-Rust weight-update abstraction + a CPU reference LoRA (issue #19).
+//! Native-Rust weight-update abstraction + a CPU reference LoRA (issue #19),
+//! plus the feature-gated Candle LoRA backend that unblocks *real* weight
+//! updates (issue #139).
+//!
+//! # Backends at a glance (issue #139)
+//!
+//! The whole SIA loop's harness-vs-weight decision needs a [`WeightUpdater`] it
+//! can call regardless of which build is in use. There are two:
+//!
+//! * [`StubWeightUpdater`] — **always compiled, the default build.** It is the
+//!   dependency-free CPU reference LoRA ([`LoraReferenceUpdater`], which it
+//!   aliases). It keeps the scheduler decisions and the closed loop working with
+//!   zero heavy dependencies and produces the stable `weight_update.json` artifact
+//!   (`updater = "lora-reference-cpu"`) that the web API + tests rely on.
+//! * [`CandleLoRAWeightUpdater`] — **behind the non-default `weight-updates`
+//!   cargo feature** (`#[cfg(feature = "weight-updates")]`). It is the real
+//!   native-Rust LoRA trainer built on HuggingFace [Candle](https://github.com/huggingface/candle)
+//!   (`candle-core` / `candle-nn`). Because those crates are **not** in this
+//!   repo's offline cargo cache and CI has no network for new heavy deps, the
+//!   feature is off by default and is **not** built in CI. The skeleton compiles
+//!   *conceptually* behind the feature and is marked with `TODO`s where the real
+//!   tensor/autograd training goes.
 //!
 //! # Why this module exists
 //!
@@ -253,9 +274,11 @@ pub struct WeightUpdateOutcome {
 
 /// A pluggable weight-update backend.
 ///
-/// The CPU reference lives in [`LoraReferenceUpdater`]; a future Candle-backed
-/// GPU implementation (behind a `weights-gpu` feature) would implement this same
-/// trait so the scheduler in #65 is backend-agnostic.
+/// The default-build backend is [`StubWeightUpdater`] (an alias for the
+/// dependency-free CPU reference [`LoraReferenceUpdater`]). The real Candle-backed
+/// LoRA trainer [`CandleLoRAWeightUpdater`] implements this same trait behind the
+/// non-default `weight-updates` feature (issue #139), so the scheduler in #65 and
+/// the closed loop in #84 stay backend-agnostic.
 pub trait WeightUpdater {
     /// Stable identifier for logging / telemetry (e.g. `"lora-reference-cpu"`).
     fn name(&self) -> &str;
@@ -456,6 +479,25 @@ impl WeightUpdater for LoraReferenceUpdater {
     }
 }
 
+/// The default-build weight updater: a relabel of the dependency-free CPU
+/// reference LoRA ([`LoraReferenceUpdater`]).
+///
+/// # Why an alias (issue #139)
+///
+/// Issue #139 asks for a [`WeightUpdater`] that **always compiles** (no heavy
+/// deps) so the full SIA loop's harness-vs-weight decision and the closed loop
+/// (#84) work in the default and `llm` builds and in CI. The existing CPU
+/// reference already satisfies that contract exactly, including the stable
+/// `weight_update.json` artifact shape (`updater = "lora-reference-cpu"`) that
+/// [`crate::web`] and `tests/web_api.rs` depend on. Rather than fork a second
+/// copy of correct, tested code, `StubWeightUpdater` is a type alias for it.
+///
+/// The name communicates intent: it is the *stub* you get until the real
+/// [`CandleLoRAWeightUpdater`] (the `weight-updates` feature) is enabled. Both
+/// implement [`WeightUpdater`], so swapping backends is a one-line change with no
+/// effect on the scheduler or the artifact consumers.
+pub type StubWeightUpdater = LoraReferenceUpdater;
+
 /// Dot product of two equal-length vectors (truncates to the shorter length).
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
@@ -544,6 +586,174 @@ pub fn should_trigger_weight_update(recent_scores: &[f64], plateau_eps: f64) -> 
         .rev()
         .take(window)
         .all(|&delta| delta < plateau_eps)
+}
+
+// --------------------------------------------------------------------------- //
+// Real native-Rust Candle LoRA backend (issue #139) — feature `weight-updates`.
+//
+// EVERYTHING below is behind `#[cfg(feature = "weight-updates")]`. The default
+// and `llm` builds (and CI) never compile it, because `candle-core` / `candle-nn`
+// are not in the offline cargo cache and CI has no network to fetch them. This is
+// a deliberately minimal, well-documented skeleton: it shows where the real
+// tensor/autograd LoRA training plugs in and is marked with `TODO`s. It is *not*
+// expected to be built in CI — only by a developer who has run
+// `cargo build --features weight-updates` with network access available.
+// --------------------------------------------------------------------------- //
+
+/// Real native-Rust LoRA weight updater built on HuggingFace Candle (issue #139).
+///
+/// # Status: documented skeleton (NOT built in CI)
+///
+/// This type only exists when the **non-default** `weight-updates` cargo feature
+/// is enabled, which also pulls in `candle-core` + `candle-nn`. Those crates are
+/// not in this repo's offline cache, so this code path is exercised only by a
+/// developer building `cargo build --features weight-updates` with network
+/// access. The default / `llm` builds and CI use [`StubWeightUpdater`] instead and
+/// are completely unaffected by anything in this block.
+///
+/// # Design (the seam is identical to the stub)
+///
+/// `CandleLoRAWeightUpdater` implements the same [`WeightUpdater`] trait, takes the
+/// same [`WeightUpdateConfig`] (rank / alpha / learning_rate / epochs) and the same
+/// [`TrainingExample`]s, and returns the same [`WeightUpdateOutcome`]. So the
+/// scheduler (#65) and closed loop (#84) treat it identically — switching backends
+/// is a single constructor swap with no other code change.
+///
+/// # What the real implementation will do (TODOs)
+///
+/// The Candle path replaces the stub's hashed `f64` feature space with real model
+/// tensors and autograd:
+///
+/// 1. Load a base model's target linear layer(s) onto a [`candle_core::Device`]
+///    (CPU here; CUDA/Metal when available) as frozen weights.
+/// 2. Attach trainable LoRA factors `A` (`rank × in`) and `B` (`out × rank`) as
+///    `candle_nn::VarMap` variables, with `B` zero-initialized so the adapter
+///    starts as a no-op (standard LoRA init).
+/// 3. Tokenize each [`TrainingExample`] (`input` → context, `target` → labels) and
+///    run a reward-weighted cross-entropy / MSE loss through the adapted layer.
+/// 4. Backprop with `candle_nn::optim` (e.g. `AdamW`) for `config.epochs`,
+///    reward-weighting each example's gradient, and record before/after loss.
+/// 5. Serialize the trained LoRA factors (e.g. `safetensors`) for reuse and report
+///    a [`WeightUpdateOutcome`] with the real losses.
+#[cfg(feature = "weight-updates")]
+pub struct CandleLoRAWeightUpdater {
+    config: WeightUpdateConfig,
+    device: candle_core::Device,
+    /// Trainable LoRA variables (`A`, `B`) live here once the layer is attached.
+    /// `VarMap` owns the tensors an optimizer steps over.
+    var_map: candle_nn::VarMap,
+}
+
+#[cfg(feature = "weight-updates")]
+impl CandleLoRAWeightUpdater {
+    /// Stable backend identifier surfaced in `weight_update.json`.
+    ///
+    /// Distinct from the stub's `"lora-reference-cpu"` so artifacts make plain
+    /// which backend produced them.
+    pub const NAME: &'static str = "candle-lora";
+
+    /// Build a Candle LoRA updater on the default CPU device.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`candle_core::Error`] if the device cannot be created. (GPU
+    /// device selection is a TODO; CPU is always available.)
+    pub fn new(config: WeightUpdateConfig) -> candle_core::Result<Self> {
+        // TODO(#139): allow selecting CUDA/Metal when the feature build has them;
+        // for now the CPU device keeps the skeleton portable.
+        let device = candle_core::Device::Cpu;
+        let var_map = candle_nn::VarMap::new();
+        Ok(Self {
+            config,
+            device,
+            var_map,
+        })
+    }
+
+    /// Borrow the Candle device this updater trains on.
+    pub fn device(&self) -> &candle_core::Device {
+        &self.device
+    }
+
+    /// Initialize (or reset) the trainable LoRA factors `A` and `B` for a layer of
+    /// shape `out × in` in `self.var_map`.
+    ///
+    /// `A` is `rank × in` (small random), `B` is `out × rank` (zeros, so the
+    /// adapter starts as a no-op). This is the standard LoRA initialization.
+    ///
+    /// # TODO(#139)
+    ///
+    /// This currently only allocates the variables; wiring them into a forward
+    /// pass over a real base layer (and freezing the base weights) is the next
+    /// step. Kept as a separate method so the forward/loss code can call it.
+    // Allowed dead code: this is the skeleton seam the real `update` loop (TODO)
+    // will call; it is not wired in yet. The whole module is feature-gated and not
+    // built in CI, so this never affects the default/`llm`/CI builds.
+    #[allow(dead_code)]
+    fn init_lora_vars(&self, in_dim: usize, out_dim: usize) -> candle_core::Result<()> {
+        use candle_nn::init::{Init, DEFAULT_KAIMING_NORMAL};
+        let rank = self.config.rank.max(1);
+        // A: rank × in, small random; B: out × rank, zeros (no-op adapter at init).
+        let _a = self.var_map.get(
+            (rank, in_dim),
+            "lora_a",
+            DEFAULT_KAIMING_NORMAL,
+            candle_core::DType::F32,
+            &self.device,
+        )?;
+        let _b = self.var_map.get(
+            (out_dim, rank),
+            "lora_b",
+            Init::Const(0.0),
+            candle_core::DType::F32,
+            &self.device,
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "weight-updates")]
+impl WeightUpdater for CandleLoRAWeightUpdater {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn update(&mut self, examples: &[TrainingExample]) -> WeightUpdateOutcome {
+        if examples.is_empty() {
+            return WeightUpdateOutcome {
+                num_examples: 0,
+                loss_before: 0.0,
+                loss_after: 0.0,
+                updated: false,
+                details: format!("{}: no training examples; weights unchanged", Self::NAME),
+            };
+        }
+
+        // TODO(#139): the real training loop:
+        //   1. self.init_lora_vars(in_dim, out_dim)? for the target layer.
+        //   2. Tokenize examples (input -> context tensor, target -> label tensor).
+        //   3. Forward through base_layer + (B·A)·(alpha/rank) adapter.
+        //   4. Reward-weighted loss; backprop with candle_nn::optim::AdamW over
+        //      self.var_map for self.config.epochs; capture loss_before/after.
+        //   5. Optionally persist the trained factors (safetensors).
+        // Until that lands, surface an explicit, non-panicking "not implemented"
+        // outcome so a `--features weight-updates` build is honest about status
+        // rather than silently fabricating a loss curve.
+        let _ = (&self.device, &self.var_map, self.config.effective_scale());
+        WeightUpdateOutcome {
+            num_examples: examples.len(),
+            loss_before: 0.0,
+            loss_after: 0.0,
+            updated: false,
+            details: format!(
+                "{}: Candle LoRA training not yet implemented (skeleton, see TODOs); \
+                 {} example(s) would be trained at rank {}",
+                Self::NAME,
+                examples.len(),
+                self.config.rank,
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -744,5 +954,73 @@ mod tests {
         assert!(should_trigger_weight_update(&[0.5, 0.5001], 0.05));
         // Two scores improving above eps => no trigger.
         assert!(!should_trigger_weight_update(&[0.1, 0.5], 0.05));
+    }
+
+    // -- StubWeightUpdater (issue #139) ----------------------------------------
+
+    /// `StubWeightUpdater` is the default-build backend and must behave exactly
+    /// like the CPU reference: same stable name (so `weight_update.json` stays
+    /// stable) and a real loss decrease on a learnable signal.
+    #[test]
+    fn stub_updater_is_the_cpu_reference_and_learns() {
+        let mut stub: StubWeightUpdater = StubWeightUpdater::new(WeightUpdateConfig {
+            epochs: 500,
+            learning_rate: 0.5,
+            ..Default::default()
+        });
+        // Name is stable -> artifact shape (`updater`) is unchanged for the web API.
+        assert_eq!(stub.name(), "lora-reference-cpu");
+
+        let outcome = stub.update(&learnable_dataset());
+        assert!(outcome.updated);
+        assert_eq!(outcome.num_examples, 3);
+        assert!(
+            outcome.loss_after < outcome.loss_before,
+            "stub must reduce loss: {} -> {}",
+            outcome.loss_before,
+            outcome.loss_after
+        );
+    }
+
+    /// The stub is callable purely through the [`WeightUpdater`] trait object,
+    /// proving the backend is swappable without the scheduler/closed-loop knowing
+    /// the concrete type.
+    #[test]
+    fn weight_updater_trait_object_dispatch() {
+        let mut updater: Box<dyn WeightUpdater> =
+            Box::new(StubWeightUpdater::new(WeightUpdateConfig::default()));
+        assert_eq!(updater.name(), "lora-reference-cpu");
+        let outcome = updater.update(&[]);
+        assert!(!outcome.updated);
+        assert_eq!(outcome.num_examples, 0);
+        // A trait object also handles real input without panicking.
+        let outcome = updater.update(&learnable_dataset());
+        assert!(outcome.updated);
+        assert_eq!(outcome.num_examples, 3);
+    }
+
+    // -- CandleLoRAWeightUpdater skeleton (issue #139, feature-gated) -----------
+    //
+    // Only compiled with `--features weight-updates`, which is NOT built in CI
+    // (candle is not in the offline cache). Locks in the skeleton's trait contract
+    // so when the real training loop lands these stay meaningful.
+    #[cfg(feature = "weight-updates")]
+    #[test]
+    fn candle_updater_implements_trait_and_is_honest_about_status() {
+        let mut updater = CandleLoRAWeightUpdater::new(WeightUpdateConfig::default())
+            .expect("CPU device always available");
+        assert_eq!(updater.name(), "candle-lora");
+
+        // Empty input -> no update, no panic.
+        let empty = updater.update(&[]);
+        assert!(!empty.updated);
+        assert_eq!(empty.num_examples, 0);
+
+        // Non-empty input -> skeleton reports "not yet implemented" (not a fake
+        // loss curve) while still counting the examples.
+        let outcome = updater.update(&learnable_dataset());
+        assert_eq!(outcome.num_examples, 3);
+        assert!(!outcome.updated);
+        assert!(outcome.details.contains("not yet implemented"));
     }
 }
