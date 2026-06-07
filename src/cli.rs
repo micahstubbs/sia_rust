@@ -22,9 +22,11 @@ fn add_run_args(cmd: Command, env_config: &Config) -> Command {
     .arg(
         Arg::new("run_id")
             .long("run_id")
-            .value_parser(clap::value_parser!(i64))
             .default_value("1")
-            .help("Run ID for this experiment (default: 1)"),
+            .help(
+                "Run ID for this experiment: a positive integer, or 'auto' to pick the next \
+                 free run_<n> under the runs root (default: 1).",
+            ),
     )
     .arg(
         Arg::new("task")

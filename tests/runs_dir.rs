@@ -8,7 +8,8 @@
 use std::sync::Mutex;
 
 use sia::layout::{names, RunLayout};
-use sia::run::resolve_runs_dir;
+use sia::run::{resolve_run_id, resolve_runs_dir};
+use sia::run_setup::setup_run_directory;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -79,4 +80,49 @@ fn test_dashboard_root_matches_run_root() {
     assert_eq!(layout.run_dir, "/shared/runs/run_3");
 
     std::env::remove_var("SIA_RUNS_DIR");
+}
+
+#[test]
+fn test_numeric_run_id_collision_still_errors() {
+    // A numeric --run_id pointing at an existing run_<id> directory must error
+    // (unchanged historical behavior), before any venv work happens.
+    let tmp = tempfile::tempdir().unwrap();
+    let runs_root = tmp.path().to_str().unwrap();
+    std::fs::create_dir(tmp.path().join("run_1")).unwrap();
+
+    let result = setup_run_directory(
+        1,
+        "/some/task",
+        "meta-model",
+        "task-model",
+        "claude",
+        3,
+        None,
+        None,
+        None,
+        runs_root,
+    );
+    assert!(
+        result.is_err(),
+        "numeric run_id on an existing run directory must error"
+    );
+    let msg = result.err().unwrap().to_string();
+    assert!(
+        msg.contains("already exists"),
+        "error should explain the collision, got: {msg}"
+    );
+}
+
+#[test]
+fn test_auto_picks_next_free_id_under_custom_runs_dir() {
+    // `auto` resolves against the provided runs root: create run_1, expect run_2.
+    let tmp = tempfile::tempdir().unwrap();
+    let runs_root = tmp.path().to_str().unwrap();
+    std::fs::create_dir(tmp.path().join("run_1")).unwrap();
+
+    let id = resolve_run_id("auto", runs_root).unwrap();
+    assert_eq!(id, 2, "auto should pick run_2 when run_1 exists");
+
+    let layout = RunLayout::for_run_id(id, runs_root);
+    assert_eq!(layout.run_dir, format!("{runs_root}/run_2"));
 }
