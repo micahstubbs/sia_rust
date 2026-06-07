@@ -65,6 +65,7 @@ feature so the default build/published crate stay lean.
 | `llm/provider_mapping.rs` | `Provider` → constructed transport (api-key/base-url resolution) |
 | `llm/retry.rs` | `RetryPolicy` + backoff + transport decorators with optional fallback |
 | `llm/structured.rs` | Structured-output extraction/parity harness + rig `Extractor` wrapper |
+| `llm/workspace/` | State-externalizing **Workspace** for Target Agents (issue #148, Harness-1) — see [docs/WORKSPACE.md](WORKSPACE.md) |
 
 Every loop is driven through an **injectable transport**, so the full tool-use
 loops are tested offline with scripted/mocked responses (real provider calls are

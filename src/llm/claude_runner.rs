@@ -33,6 +33,7 @@ use super::anthropic_api::{
     ApiMessage, ContentBlock, MessagesRequest, MessagesResponse, MessagesTransport,
 };
 use super::trajectory_middleware::{TokenUsage, TrajectoryEvent, TrajectoryMiddleware};
+use super::workspace::{Workspace, WorkspaceSession, WORKSPACE_SNAPSHOT_JSON};
 use super::{telemetry, tools, AgentRunOutcome};
 
 /// Default `max_tokens` per API response. The agent loop bounds *turns*; this
@@ -129,8 +130,77 @@ pub fn run_claude_agent(
     working_dir: &str,
     config: &Config,
 ) -> SiaResult<AgentRunOutcome> {
+    let (outcome, _ws) = run_claude_agent_inner(
+        transport,
+        model,
+        max_turns,
+        prompt,
+        working_dir,
+        config,
+        None,
+    )?;
+    Ok(outcome)
+}
+
+/// Like [`run_claude_agent`], but additionally exposes the state-externalizing
+/// [`Workspace`] tools (issue #148) to the model.
+///
+/// The provided [`WorkspaceSession`] (start it empty, or from a task preset such
+/// as [`super::workspace::legal::legal_preset`]) accumulates the agent's
+/// `add_candidate` / `curate_evidence` / `verify_claim` / … calls. After the run
+/// the final workspace is snapshotted to `workspace.json` next to
+/// `agent_execution.json` (the per-step deltas are already in the trajectory),
+/// and returned so the Feedback Agent and the adaptive scheduler can diagnose it.
+pub fn run_claude_agent_with_workspace(
+    transport: &dyn MessagesTransport,
+    model: &str,
+    max_turns: u32,
+    prompt: &str,
+    working_dir: &str,
+    config: &Config,
+    session: WorkspaceSession,
+) -> SiaResult<(AgentRunOutcome, Workspace)> {
+    let (outcome, ws) = run_claude_agent_inner(
+        transport,
+        model,
+        max_turns,
+        prompt,
+        working_dir,
+        config,
+        Some(session),
+    )?;
+    Ok((outcome, ws.expect("workspace session was provided")))
+}
+
+/// Snapshot the workspace (if any) to `workspace.json` under `working_dir`.
+fn persist_workspace(working_dir: &str, session: Option<&WorkspaceSession>) {
+    if let Some(session) = session {
+        let path = Path::new(working_dir).join(WORKSPACE_SNAPSHOT_JSON);
+        if let Ok(body) = serde_json::to_string_pretty(&session.workspace().snapshot()) {
+            let _ = std::fs::write(path, body);
+        }
+    }
+}
+
+/// The shared loop backing [`run_claude_agent`] and
+/// [`run_claude_agent_with_workspace`]. When `session` is `Some`, the workspace
+/// tools are added to the tool set, workspace tool calls are routed to the
+/// session, and the final workspace is persisted and returned.
+#[allow(clippy::too_many_arguments)]
+fn run_claude_agent_inner(
+    transport: &dyn MessagesTransport,
+    model: &str,
+    max_turns: u32,
+    prompt: &str,
+    working_dir: &str,
+    config: &Config,
+    mut session: Option<WorkspaceSession>,
+) -> SiaResult<(AgentRunOutcome, Option<Workspace>)> {
     let wd = Path::new(working_dir);
-    let tool_defs = tools::tool_defs();
+    let mut tool_defs = tools::tool_defs();
+    if session.is_some() {
+        tool_defs.extend(super::workspace::workspace_tool_defs());
+    }
 
     let mut mw = TrajectoryMiddleware::new();
     mw.start();
@@ -161,6 +231,7 @@ pub fn run_claude_agent(
                 let (trajectory, metrics) = mw.finish();
                 let _ = trajectory.write_to(working_dir);
                 telemetry::write_run_telemetry(working_dir, &metrics);
+                persist_workspace(working_dir, session.as_ref());
                 return Err(e);
             }
         };
@@ -202,10 +273,14 @@ pub fn run_claude_agent(
                 .write_to(working_dir)
                 .map_err(|e| SiaError::new(format!("failed to write agent_execution.json: {e}")))?;
             telemetry::write_run_telemetry(working_dir, &metrics);
-            return Ok(AgentRunOutcome {
-                final_text,
-                trajectory,
-            });
+            persist_workspace(working_dir, session.as_ref());
+            return Ok((
+                AgentRunOutcome {
+                    final_text,
+                    trajectory,
+                },
+                session.map(WorkspaceSession::into_workspace),
+            ));
         }
 
         // Execute each tool call and build the user tool_result message. Every
@@ -213,7 +288,12 @@ pub fn run_claude_agent(
         let caps = Capabilities::agent_default(wd);
         let mut result_blocks: Vec<ContentBlock> = Vec::new();
         for (id, name, input) in &tool_uses {
-            let result = execute_tool(&caps, wd, name, input, config.shell_timeout);
+            // Route workspace tools (issue #148) to the session; everything else
+            // goes to the sandboxed file/shell executors.
+            let result = match session.as_mut() {
+                Some(s) if WorkspaceSession::handles(name) => s.dispatch(name, input),
+                _ => execute_tool(&caps, wd, name, input, config.shell_timeout),
+            };
             let is_error = tools::is_error_result(&result);
             mw.record(TrajectoryEvent::ToolResult {
                 tool_use_id: id.clone(),
@@ -238,16 +318,21 @@ pub fn run_claude_agent(
         .write_to(working_dir)
         .map_err(|e| SiaError::new(format!("failed to write agent_execution.json: {e}")))?;
     telemetry::write_run_telemetry(working_dir, &metrics);
-    Ok(AgentRunOutcome {
-        final_text,
-        trajectory,
-    })
+    persist_workspace(working_dir, session.as_ref());
+    Ok((
+        AgentRunOutcome {
+            final_text,
+            trajectory,
+        },
+        session.map(WorkspaceSession::into_workspace),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::anthropic_api::{ApiUsage, ToolDef};
+    use crate::llm::workspace::VerificationStatus;
     use std::cell::RefCell;
 
     /// A transport that returns a scripted sequence of responses, one per call.
@@ -659,5 +744,110 @@ mod tests {
         let b = execute_tool(&caps, wd, "Bash", &json!({"command": "echo hi"}), 10);
         assert!(!tools::is_error_result(&b), "{b}");
         assert!(b.contains("hi"));
+    }
+
+    /// Issue #148: a Target Agent drives the externalized workspace through the
+    /// tool loop, and the final state is persisted to `workspace.json`.
+    #[test]
+    fn workspace_tools_drive_session_and_persist_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path();
+        let wd_str = wd.to_str().unwrap();
+
+        // Turn 1: add a candidate. Turn 2: curate evidence from it.
+        // Turn 3: verify the claim. Turn 4: end the turn.
+        let transport = MockTransport::new(vec![
+            resp(
+                vec![ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "workspace_add_candidate".into(),
+                    input: json!({"content": "Defendant ran the red light.", "source": "police-report"}),
+                }],
+                "tool_use",
+            ),
+            resp(
+                vec![ContentBlock::ToolUse {
+                    id: "t2".into(),
+                    name: "workspace_curate_evidence".into(),
+                    input: json!({
+                        "claim": "Negligence per se from traffic violation",
+                        "importance": 0.9,
+                        "provenance": ["cand-1"],
+                        "tags": ["rule"]
+                    }),
+                }],
+                "tool_use",
+            ),
+            resp(
+                vec![ContentBlock::ToolUse {
+                    id: "t3".into(),
+                    name: "workspace_verify_claim".into(),
+                    input: json!({"id": "ev-1", "status": "verified", "note": "Veh. Code § 21453"}),
+                }],
+                "tool_use",
+            ),
+            resp(
+                vec![ContentBlock::Text {
+                    text: "Spotted and verified the issue.".into(),
+                }],
+                "end_turn",
+            ),
+        ]);
+
+        let session = WorkspaceSession::new();
+        let (outcome, ws) = run_claude_agent_with_workspace(
+            &transport,
+            "claude-test",
+            16,
+            "Spot the issues.",
+            wd_str,
+            &Config::default(),
+            session,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.final_text, "Spotted and verified the issue.");
+        // The session accumulated the agent's actions.
+        assert_eq!(ws.candidates.len(), 1);
+        assert_eq!(ws.candidates[0].source.as_deref(), Some("police-report"));
+        let ev = ws.evidence_by_id("ev-1").unwrap();
+        assert_eq!(ev.verification, VerificationStatus::Verified);
+        assert_eq!(ev.provenance, vec!["cand-1"]);
+
+        // workspace.json was persisted next to agent_execution.json and matches.
+        let snap_path = wd.join(WORKSPACE_SNAPSHOT_JSON);
+        assert!(snap_path.exists(), "workspace.json should be written");
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&snap_path).unwrap()).unwrap();
+        assert_eq!(on_disk, ws.snapshot());
+
+        // The workspace tools were offered to the model alongside the file tools.
+        let first_req = &transport.requests.borrow()[0];
+        let names: Vec<&str> = first_req.tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"Bash"));
+        assert!(names.contains(&"workspace_curate_evidence"));
+    }
+
+    /// The default `run_claude_agent` path must NOT expose workspace tools, so the
+    /// lean behavior is unchanged for callers that don't opt in.
+    #[test]
+    fn default_runner_does_not_expose_workspace_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = dir.path().to_str().unwrap();
+        let transport = MockTransport::new(vec![resp(
+            vec![ContentBlock::Text { text: "ok".into() }],
+            "end_turn",
+        )]);
+        run_claude_agent(&transport, "claude-test", 4, "go", wd, &Config::default()).unwrap();
+        let names: Vec<String> = transport.requests.borrow()[0]
+            .tools
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
+        assert!(!names.iter().any(|n| n.starts_with("workspace_")));
+        // And no workspace.json is written.
+        assert!(!std::path::Path::new(wd)
+            .join(WORKSPACE_SNAPSHOT_JSON)
+            .exists());
     }
 }

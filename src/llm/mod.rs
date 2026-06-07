@@ -58,12 +58,13 @@ pub mod telemetry;
 pub mod tools;
 mod trajectory;
 pub mod trajectory_middleware;
+pub mod workspace;
 
 pub use anthropic_api::{
     ApiMessage, ApiUsage, ContentBlock, HttpMessagesTransport, MessagesRequest, MessagesResponse,
     MessagesTransport, ToolDef,
 };
-pub use claude_runner::run_claude_agent;
+pub use claude_runner::{run_claude_agent, run_claude_agent_with_workspace};
 pub use openai_api::{
     ChatMessage, ChatRequest, ChatResponse, ChatTool, ChatTransport, ChatUsage, Choice,
     FunctionCall, FunctionDef, HttpChatTransport, ToolCall,
