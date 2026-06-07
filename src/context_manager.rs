@@ -367,9 +367,13 @@ impl ContextManager {
             .collect()
     }
 
-    /// Attempt an LLM-generated change summary. The Rust port has no LLM SDK wired,
-    /// so the agent runner errs and this returns `None` (matching the Python
-    /// golden tests that patch `_generate_llm_summary` to `None`).
+    /// Attempt an LLM-generated change summary by dispatching to the meta agent
+    /// via [`run_agent`]. With `--features llm` and a configured provider this
+    /// generates the "Evolution Summary" section (parity with Python's
+    /// `_generate_llm_summary`); when the LLM is unavailable (default build, no
+    /// key, or any runner error) it returns `None` — the same graceful fallback
+    /// the Python version takes when the agent call fails (and which the golden
+    /// tests pin by patching `_generate_llm_summary` to `None`).
     fn generate_llm_summary(&self, gen_num: i64) -> Option<String> {
         if gen_num == 1 {
             return None;

@@ -30,7 +30,10 @@ fn add_run_args(cmd: Command, env_config: &Config) -> Command {
         Arg::new("task")
             .long("task")
             .value_parser(clap::builder::PossibleValuesParser::new(BUNDLED_TASKS))
-            .help("Name of a bundled task shipped with sia"),
+            .help(format!(
+                "Name of a bundled task shipped with sia-agent ({})",
+                BUNDLED_TASKS.join(", ")
+            )),
     )
     .arg(
         Arg::new("task_dir")
@@ -46,20 +49,27 @@ fn add_run_args(cmd: Command, env_config: &Config) -> Command {
         Arg::new("meta_agent_profile")
             .long("meta-agent-profile")
             .default_value(env_config.default_meta_agent_profile.clone())
-            .help("Agent profile for the meta/feedback agent (name or path to a .json file)"),
+            .help(
+                "Agent profile for the meta/feedback agent: a bundled/user profile name or a \
+                 path to a .json file. A profile bundles agent_impl + model + provider.",
+            ),
     )
     .arg(
         Arg::new("target_agent_profile")
             .long("target-agent-profile")
             .default_value(env_config.default_target_agent_profile.clone())
-            .help("Agent profile for the target agent (name or path to a .json file)"),
+            .help(
+                "Agent profile for the target agent: a bundled/user profile name or a path to a \
+                 .json file. The model + provider the generated target_agent.py will call, plus \
+                 its agent_reference (seed code).",
+            ),
     )
     .arg(
         Arg::new("sandbox")
             .long("sandbox")
             .value_parser(["none", "docker"])
             .default_value(env_config.sandbox_mode.clone())
-            .help("Sandbox mode for target agent execution: none (default) or docker"),
+            .help("Sandbox mode for target agent execution: none (default) or docker (requires Docker)"),
     )
     .arg(
         Arg::new("log_level")
