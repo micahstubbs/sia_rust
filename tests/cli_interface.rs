@@ -20,6 +20,22 @@ fn test_top_level_help_lists_subcommands() {
 }
 
 #[test]
+fn test_banner_points_to_rust_port_repo() {
+    // The welcome banner prints on every invocation (including --help). It must
+    // advertise the Rust-port repo, not the upstream Python repo. See issue #117.
+    let out = sia(&["--help"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("https://github.com/micahstubbs/sia_rust"),
+        "banner should link to the Rust-port repo"
+    );
+    assert!(
+        !stdout.contains("hexo-ai/sia"),
+        "banner must not link to the upstream Python repo"
+    );
+}
+
+#[test]
 fn test_run_help_exposes_orchestrator_flags() {
     let out = sia(&["run", "--help"]);
     assert!(out.status.success());

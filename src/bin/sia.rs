@@ -19,7 +19,7 @@ fn print_welcome() {
     Self-Improving AI framework
 
     • Version : v{version}
-    • Docs    : https://github.com/hexo-ai/sia
+    • Docs    : https://github.com/micahstubbs/sia_rust
     • Help    : sia --help
 "#,
         version = sia::VERSION
