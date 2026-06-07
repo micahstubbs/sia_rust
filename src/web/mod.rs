@@ -5,4 +5,4 @@
 pub mod runs;
 pub mod server;
 
-pub use server::{create_app, serve, serve_in_background};
+pub use server::{create_app, serve, serve_in_background, BackgroundDashboard};

@@ -48,6 +48,15 @@ schemars = { version = "1", optional = true }
 # `llm` builds gain no dependency. The crate compiles on all platforms but its
 # enforcement is a graceful no-op off Linux / on kernels without Landlock.
 landlock = { version = "0.4", optional = true }
+# Native-Rust weight-update (LoRA fine-tuning) backend (issue #139). These are
+# HuggingFace Candle crates — they are heavy and, critically, NOT present in this
+# repo's offline cargo cache, and CI has no network to fetch new heavy deps. They
+# are therefore declared `optional = true` and gated behind the non-default
+# `weight-updates` feature, so the default and `llm` builds (and CI) never pull
+# them in. The real `CandleLoRAWeightUpdater` lives behind that feature; the
+# default build always uses the dependency-free `StubWeightUpdater`.
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
 
 [features]
 # Native LLM client (issue #50). Non-default so the published build stays lean.
@@ -58,6 +67,12 @@ llm = ["dep:rig-core", "dep:reqwest", "dep:glob", "dep:schemars"]
 # Linux-only at runtime; on other platforms / old kernels it degrades to a
 # logged no-op. Kept off the default build so no new dependency is pulled in.
 landlock-sandbox = ["dep:landlock"]
+# Native-Rust Candle LoRA weight-update backend (issue #139). NON-DEFAULT and
+# intentionally NOT built in CI: the `candle-*` crates are not in the offline
+# cargo cache, so enabling this requires network to fetch them. The default and
+# `llm` builds are unaffected; with the feature off, the closed loop transparently
+# uses `StubWeightUpdater`. See `src/weights.rs` for the (TODO-marked) skeleton.
+weight-updates = ["dep:candle-core", "dep:candle-nn"]
 
 [dev-dependencies]
 tempfile = "3"

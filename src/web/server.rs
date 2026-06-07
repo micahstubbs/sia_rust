@@ -4,7 +4,7 @@
 //! (the `sia web` command); `serve_in_background(...)` starts it on a daemon thread
 //! so the orchestrator can expose a live dashboard during `sia run`.
 
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -203,42 +203,124 @@ fn not_found(detail: &str) -> Response {
 
 /// Run the server in the foreground (blocks). Used by `sia web`.
 pub fn serve(host: &str, port: u16, runs_dir: &str, _open_browser: bool) -> crate::SiaResult<()> {
-    let app = create_app(runs_dir);
     let addr = resolve_addr(host, port)?;
+    // Bind synchronously up front so a bind failure (e.g. port in use) is
+    // observable here rather than being swallowed on a background thread.
+    let listener = TcpListener::bind(addr)
+        .map_err(|e| crate::SiaError::new(format!("Could not bind {addr}: {e}")))?;
     let resolved = std::fs::canonicalize(runs_dir).unwrap_or_else(|_| PathBuf::from(runs_dir));
     println!(
         "SIA visualizer serving {} at http://{}",
         resolved.display(),
         addr
     );
+    serve_with_listener(listener, runs_dir)
+}
+
+/// Run the axum app on an already-bound `TcpListener` (blocks). This lets the
+/// caller perform (and observe) the bind before deciding to announce the URL.
+pub fn serve_with_listener(listener: TcpListener, runs_dir: &str) -> crate::SiaResult<()> {
+    let app = create_app(runs_dir);
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| crate::SiaError::new(e.to_string()))?;
 
     let rt = tokio::runtime::Runtime::new().map_err(|e| crate::SiaError::new(e.to_string()))?;
     rt.block_on(async move {
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|e| crate::SiaError::new(format!("Could not bind {addr}: {e}")))?;
+        let listener = tokio::net::TcpListener::from_std(listener)
+            .map_err(|e| crate::SiaError::new(e.to_string()))?;
         axum::serve(listener, app)
             .await
             .map_err(|e| crate::SiaError::new(e.to_string()))
     })
 }
 
-/// Start the server on a daemon thread; never blocks. Returns the thread handle.
+/// Outcome of starting the background dashboard: the bound port and the thread.
+pub struct BackgroundDashboard {
+    /// The port the listener actually bound to (may differ from the requested
+    /// one when `explicit_port` is false and the default port was in use).
+    pub port: u16,
+    /// Daemon thread running the server. Dropping it leaves the server running.
+    pub handle: std::thread::JoinHandle<()>,
+}
+
+/// Bind a `TcpListener` for the dashboard, choosing a fallback port when allowed.
+///
+/// * `explicit_port == true`: bind exactly `port`. A bind failure is returned as
+///   an actionable error (the user asked for this specific port).
+/// * `explicit_port == false`: try `port`, then a handful of incrementing ports,
+///   and finally fall back to an OS-assigned ephemeral port (`:0`).
+fn bind_dashboard_listener(
+    host: &str,
+    port: u16,
+    explicit_port: bool,
+) -> crate::SiaResult<TcpListener> {
+    let addr = resolve_addr(host, port)?;
+
+    if explicit_port {
+        return TcpListener::bind(addr).map_err(|e| {
+            crate::SiaError::new(format!(
+                "Could not bind dashboard to {addr}: {e}. \
+                 The port may be in use; pass a different --web-port or omit it to auto-select."
+            ))
+        });
+    }
+
+    // Default port: try the requested port, then a few neighbours, then :0.
+    let mut last_err = None;
+    for candidate in port..port.saturating_add(20) {
+        let candidate_addr = SocketAddr::new(addr.ip(), candidate);
+        match TcpListener::bind(candidate_addr) {
+            Ok(listener) => return Ok(listener),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    // Final fallback: let the OS pick any free port.
+    let ephemeral = SocketAddr::new(addr.ip(), 0);
+    TcpListener::bind(ephemeral).map_err(|e| {
+        let detail = last_err
+            .map(|prev| format!(" (last attempt near {port}: {prev})"))
+            .unwrap_or_default();
+        crate::SiaError::new(format!(
+            "Could not bind dashboard to any port on {host}: {e}{detail}"
+        ))
+    })
+}
+
+/// Start the server on a daemon thread; never blocks.
+///
+/// The listener is bound synchronously *before* this returns, so a bind failure
+/// is reported to the caller instead of being silently lost on the background
+/// thread. On success the returned [`BackgroundDashboard`] carries the port that
+/// was actually bound, which the caller should use when announcing the URL.
+///
+/// When `explicit_port` is false and the requested port is occupied, the next
+/// available port (or an OS-assigned ephemeral port) is chosen automatically.
+/// When `explicit_port` is true a bind failure is surfaced as an error.
 pub fn serve_in_background(
     host: &str,
     port: u16,
     runs_dir: &str,
-) -> Option<std::thread::JoinHandle<()>> {
-    let host_owned = host.to_string();
+    explicit_port: bool,
+) -> crate::SiaResult<BackgroundDashboard> {
+    let listener = bind_dashboard_listener(host, port, explicit_port)?;
+    let bound_port = listener
+        .local_addr()
+        .map_err(|e| crate::SiaError::new(e.to_string()))?
+        .port();
+
     let runs_dir = runs_dir.to_string();
     let handle = std::thread::Builder::new()
         .name("sia-web".to_string())
         .spawn(move || {
-            let _ = serve(&host_owned, port, &runs_dir, false);
+            let _ = serve_with_listener(listener, &runs_dir);
         })
-        .ok()?;
-    println!("Live dashboard: http://{host}:{port}");
-    Some(handle)
+        .map_err(|e| crate::SiaError::new(format!("Could not spawn dashboard thread: {e}")))?;
+
+    Ok(BackgroundDashboard {
+        port: bound_port,
+        handle,
+    })
 }
 
 fn resolve_addr(host: &str, port: u16) -> crate::SiaResult<std::net::SocketAddr> {
