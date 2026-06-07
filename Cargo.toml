@@ -48,6 +48,17 @@ schemars = { version = "1", optional = true }
 # `llm` builds gain no dependency. The crate compiles on all platforms but its
 # enforcement is a graceful no-op off Linux / on kernels without Landlock.
 landlock = { version = "0.4", optional = true }
+# OS-level network-egress confinement (issue #140, stage 2b). seccomp-bpf syscall
+# filter from the rust-vmm / Firecracker team (Apache-2.0 OR BSD-3-Clause); its only
+# mandatory dependency is `libc`. Behind the non-default `seccomp-sandbox` feature so
+# the default and `llm` builds gain no dependency. Linux-only; the crate compiles on
+# any platform but its enforcement is a graceful no-op off Linux / on kernels without
+# seccomp. Pinned to 0.5.x.
+seccompiler = { version = "0.5", optional = true }
+# Syscall numbers / constants (AF_INET, EACCES, SYS_socket) for the seccomp filter.
+# Optional and pulled in only by `seccomp-sandbox`; it is already a transitive dep of
+# seccompiler, so this adds nothing to the default / `llm` builds.
+libc = { version = "0.2", optional = true }
 # Native-Rust weight-update (LoRA fine-tuning) backend (issue #139). These are
 # HuggingFace Candle crates — they are heavy and, critically, NOT present in this
 # repo's offline cargo cache, and CI has no network to fetch new heavy deps. They
@@ -67,6 +78,14 @@ llm = ["dep:rig-core", "dep:reqwest", "dep:glob", "dep:schemars"]
 # Linux-only at runtime; on other platforms / old kernels it degrades to a
 # logged no-op. Kept off the default build so no new dependency is pulled in.
 landlock-sandbox = ["dep:landlock"]
+# OS-level seccomp network-egress filter (issue #140, stage 2b). Non-default and
+# Linux-only at runtime; on other platforms / kernels without seccomp it degrades to
+# a logged no-op. Kept off the default and `llm` builds so no new dependency is pulled
+# in, and (like `landlock-sandbox`) NOT built in CI — verified locally instead. When
+# `Capabilities.allow_network` is false, installs a seccomp-bpf filter that fails the
+# network-creating syscalls (socket/connect/...) with EACCES while allowing everything
+# else, so the Python child keeps running. See `src/sandbox.rs::seccomp_support`.
+seccomp-sandbox = ["dep:seccompiler", "dep:libc"]
 # Native-Rust Candle LoRA weight-update backend (issue #139). NON-DEFAULT and
 # intentionally NOT built in CI: the `candle-*` crates are not in the offline
 # cargo cache, so enabling this requires network to fetch them. The default and

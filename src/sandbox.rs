@@ -46,8 +46,10 @@
 //!    confinement that survives a logic bug in the tool layer. The **Landlock
 //!    filesystem** half of this stage is implemented in [`landlock_support`],
 //!    behind the non-default `landlock-sandbox` cargo feature, and degrades to a
-//!    logged no-op off Linux / on kernels without Landlock. The seccomp network
-//!    filter remains roadmap.
+//!    logged no-op off Linux / on kernels without Landlock. The **seccomp network
+//!    egress filter** is implemented in [`seccomp_support`], behind the non-default
+//!    `seccomp-sandbox` cargo feature, and likewise degrades to a logged no-op off
+//!    Linux / on kernels without seccomp.
 //! 3. **WASI component model.** Run untrusted generated agents as WebAssembly
 //!    components under [`wasmtime`](https://crates.io/crates/wasmtime) with
 //!    [`wasi`](https://crates.io/crates/wasi) preview2 capabilities, granting only
@@ -335,6 +337,9 @@ pub enum SecurityAction {
     Size,
     /// An OS-level sandbox (e.g. Landlock) was applied to the process/thread.
     SandboxApply,
+    /// An OS-level network-egress filter (seccomp) was applied to the
+    /// process/thread.
+    NetworkFilterApply,
 }
 
 impl SecurityAction {
@@ -346,6 +351,7 @@ impl SecurityAction {
             SecurityAction::Bash => "bash",
             SecurityAction::Size => "size",
             SecurityAction::SandboxApply => "sandbox_apply",
+            SecurityAction::NetworkFilterApply => "network_filter_apply",
         }
     }
 }
@@ -680,6 +686,192 @@ pub mod landlock_support {
     }
 }
 
+// ===========================================================================
+// OS-level enforcement (stage 2b): seccomp network-egress filter (issue #140)
+// ===========================================================================
+//
+// `seccomp_support` (behind the non-default `seccomp-sandbox` feature) installs a
+// seccomp-bpf syscall filter that blocks the network-creating syscalls when
+// `Capabilities::allow_network` is false, complementing the Landlock filesystem
+// layer. Like Landlock, it is kernel-enforced — it survives a logic bug or
+// prompt-injection that bypasses the in-process allow-list — and Linux-only, and it
+// **degrades to a logged no-op** off Linux / on kernels without seccomp, behind a
+// runtime capability probe. It never breaks the build, the CI runner, or a run.
+//
+// Policy: the default action is **Allow** (so the Python target child keeps running
+// — we deliberately do NOT attempt a full syscall allow-list, which would break the
+// interpreter), and only the egress chokepoint syscalls are filtered. Internet
+// socket *creation* (`socket(AF_INET/AF_INET6, ...)`) is denied with `EACCES`,
+// argument-filtered on the address family so local `AF_UNIX` IPC (used by parts of
+// the Python runtime) keeps working. Denying socket creation is sufficient to block
+// egress: `connect`/`sendto`/`sendmsg` cannot run without an internet socket fd.
+
+/// Linux seccomp network-egress filter (feature `seccomp-sandbox`).
+///
+/// On non-Linux targets or without the feature,
+/// [`apply_network_filter`](seccomp_support::apply_network_filter) is a no-op
+/// returning [`SandboxStatus::NotSupported`]; on Linux, when `caps.allow_network`
+/// is false, it installs a seccomp-bpf filter that fails internet-socket creation
+/// with `EACCES` while allowing every other syscall. When `caps.allow_network` is
+/// true it is a no-op (network is permitted, so nothing to confine).
+pub mod seccomp_support {
+    use super::{Capabilities, SandboxStatus};
+
+    /// Apply a seccomp network-egress filter to the calling thread (and, on the
+    /// real path, its future children via the kernel filter inheritance).
+    ///
+    /// Returns the [`SandboxStatus`] reflecting what happened:
+    /// - [`SandboxStatus::Enforced`] — the filter was installed by the kernel;
+    /// - [`SandboxStatus::NotSupported`] — network was allowed (nothing to do),
+    ///   the platform/kernel can't enforce seccomp, the feature is off, or a
+    ///   runtime probe / install failed (degraded to a logged no-op).
+    ///
+    /// This is best-effort confinement layered on top of the in-process capability
+    /// allow-list, which remains the policy source of truth.
+    ///
+    /// # Degradation
+    ///
+    /// Without `--features seccomp-sandbox`, on any non-Linux target, or on a kernel
+    /// that rejects the `seccomp` syscall, this logs a warning and returns
+    /// [`SandboxStatus::NotSupported`] — it never errors and never breaks a run.
+    #[cfg(all(feature = "seccomp-sandbox", target_os = "linux"))]
+    pub fn apply_network_filter(caps: &Capabilities) -> SandboxStatus {
+        // Network permitted: nothing to confine.
+        if caps.allow_network {
+            return SandboxStatus::NotSupported;
+        }
+
+        match build_and_install() {
+            Ok(()) => SandboxStatus::Enforced,
+            Err(e) => {
+                log::warn!(
+                    "seccomp: failed to install network-egress filter ({e}); \
+                     running without OS network confinement"
+                );
+                SandboxStatus::NotSupported
+            }
+        }
+    }
+
+    /// Build the deny-internet-socket filter and install it on the calling thread.
+    ///
+    /// Split out from [`apply_network_filter`] so the error handling stays a single
+    /// match and the test suite can exercise filter *construction* (the
+    /// `BpfProgram` compile) independently of the kernel install.
+    #[cfg(all(feature = "seccomp-sandbox", target_os = "linux"))]
+    fn build_and_install() -> Result<(), Box<dyn std::error::Error>> {
+        let filter = build_filter()?;
+        seccompiler::apply_filter(&filter)?;
+        Ok(())
+    }
+
+    /// Compile the seccomp BPF program that denies internet-socket creation.
+    ///
+    /// Default action `Allow`; matched action `Errno(EACCES)`. The only filtered
+    /// syscall is `socket`, argument-filtered so that creating an `AF_INET` or
+    /// `AF_INET6` socket is denied while every other domain (notably `AF_UNIX`) and
+    /// every other syscall is allowed.
+    #[cfg(all(feature = "seccomp-sandbox", target_os = "linux"))]
+    pub(crate) fn build_filter() -> Result<seccompiler::BpfProgram, Box<dyn std::error::Error>> {
+        use seccompiler::{
+            SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
+            SeccompRule,
+        };
+        use std::convert::TryInto;
+
+        // `socket(domain, type, protocol)`: arg 0 is the address family. Deny
+        // creation of internet sockets (AF_INET=2, AF_INET6=10). Each condition is a
+        // separate OR-bound rule mapped to the same syscall, so a match on either
+        // family triggers the match action.
+        let inet = SeccompCondition::new(
+            0,
+            SeccompCmpArgLen::Dword,
+            SeccompCmpOp::Eq,
+            libc::AF_INET as u64,
+        )?;
+        let inet6 = SeccompCondition::new(
+            0,
+            SeccompCmpArgLen::Dword,
+            SeccompCmpOp::Eq,
+            libc::AF_INET6 as u64,
+        )?;
+
+        let rules = vec![(
+            libc::SYS_socket,
+            vec![
+                SeccompRule::new(vec![inet])?,
+                SeccompRule::new(vec![inet6])?,
+            ],
+        )];
+
+        let filter = SeccompFilter::new(
+            rules.into_iter().collect(),
+            // Default action for everything that doesn't match: allow it through, so
+            // the Python child and all non-network syscalls run normally.
+            SeccompAction::Allow,
+            // Matched (internet `socket`) action: fail with EACCES rather than
+            // SIGSYS, so the caller sees a normal "permission denied" socket error
+            // instead of the process being killed.
+            SeccompAction::Errno(libc::EACCES as u32),
+            std::env::consts::ARCH.try_into()?,
+        )?;
+
+        Ok(filter.try_into()?)
+    }
+
+    /// No-op fallback: the feature is on but the target is not Linux.
+    #[cfg(all(feature = "seccomp-sandbox", not(target_os = "linux")))]
+    pub fn apply_network_filter(_caps: &Capabilities) -> SandboxStatus {
+        log::warn!(
+            "seccomp: not supported on this platform (only Linux); \
+             network egress is guarded only by the in-process allow-list"
+        );
+        SandboxStatus::NotSupported
+    }
+
+    /// No-op fallback: the `seccomp-sandbox` feature is disabled.
+    #[cfg(not(feature = "seccomp-sandbox"))]
+    pub fn apply_network_filter(_caps: &Capabilities) -> SandboxStatus {
+        log::warn!(
+            "seccomp: built without the `seccomp-sandbox` feature; \
+             network egress is guarded only by the in-process allow-list"
+        );
+        SandboxStatus::NotSupported
+    }
+}
+
+impl Capabilities {
+    /// Apply the OS-level seccomp network-egress filter for this capability set and
+    /// record the outcome to `log` as a [`SecurityEvent`].
+    ///
+    /// This is the *observable* entry point a runner calls at startup. When
+    /// `allow_network` is false it attempts to install the seccomp filter (a no-op
+    /// where unsupported); the returned [`SandboxStatus`] is folded into a
+    /// `network_filter_apply` event whose `outcome` is `Denied` when the filter was
+    /// kernel-enforced (network egress is now *denied* for this thread) and
+    /// `Allowed` otherwise (network is permitted, or enforcement degraded to a
+    /// no-op). The status tag is carried in `detail`.
+    pub fn apply_network_filter_logged(&self, log: &mut SecurityLog) -> SandboxStatus {
+        let status = seccomp_support::apply_network_filter(self);
+        // When the filter is kernel-enforced, network egress is now *denied* for
+        // this thread, so the event outcome is `Denied`; otherwise (network
+        // permitted, unsupported, or degraded) it is `Allowed`. `detail` always
+        // carries the status tag so telemetry can tell those cases apart.
+        let outcome = if status.is_enforced() {
+            SecurityOutcome::Denied
+        } else {
+            SecurityOutcome::Allowed
+        };
+        log.record(SecurityEvent {
+            action: SecurityAction::NetworkFilterApply,
+            outcome,
+            target: self.fs_root.display().to_string(),
+            detail: status.as_str().to_string(),
+        });
+        status
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -952,6 +1144,10 @@ mod tests {
         assert_eq!(SecurityAction::Bash.as_str(), "bash");
         assert_eq!(SecurityAction::Size.as_str(), "size");
         assert_eq!(SecurityAction::SandboxApply.as_str(), "sandbox_apply");
+        assert_eq!(
+            SecurityAction::NetworkFilterApply.as_str(),
+            "network_filter_apply"
+        );
         assert_eq!(SecurityOutcome::Allowed.as_str(), "allowed");
         assert_eq!(SecurityOutcome::Denied.as_str(), "denied");
     }
@@ -998,5 +1194,85 @@ mod tests {
                 | SandboxStatus::NotSupported
         ));
         assert!(["enforced", "partially_enforced", "not_supported"].contains(&status.as_str()));
+    }
+
+    // --- seccomp network-egress filter (issue #140, stage 2b) -------------
+
+    /// `apply_network_filter` must *never* fail the suite, regardless of feature /
+    /// platform / kernel. Without `seccomp-sandbox` (the default + `llm` CI builds)
+    /// it returns `NotSupported`; with the feature on Linux it returns `Enforced`
+    /// when the kernel installs the filter or `NotSupported` when seccomp is
+    /// unavailable in the sandbox. We assert only that the status is a known tag and
+    /// nothing panics.
+    ///
+    /// IMPORTANT: this only filters *internet socket creation*; it does not call any
+    /// irreversible `restrict_self`, and the filter (when installed) blocks only
+    /// `socket(AF_INET/AF_INET6, ...)`, so the rest of this test thread is
+    /// unaffected. Cargo runs each test on its own thread, so even an installed
+    /// filter does not leak into sibling tests.
+    #[test]
+    fn seccomp_apply_network_filter_returns_a_status_and_never_panics() {
+        // Network denied -> attempt to install (no-op where unsupported).
+        let caps = Capabilities::default(); // allow_network = false
+        let status = seccomp_support::apply_network_filter(&caps);
+        assert!(matches!(
+            status,
+            SandboxStatus::Enforced
+                | SandboxStatus::PartiallyEnforced
+                | SandboxStatus::NotSupported
+        ));
+        assert!(["enforced", "partially_enforced", "not_supported"].contains(&status.as_str()));
+    }
+
+    /// When network is *allowed*, there is nothing to confine: the call is a no-op
+    /// that reports `NotSupported` on every build/platform (including with the
+    /// feature on Linux), so it never installs a filter.
+    #[test]
+    fn seccomp_no_filter_when_network_allowed() {
+        let mut caps = Capabilities::permissive(root());
+        caps.allow_network = true;
+        let status = seccomp_support::apply_network_filter(&caps);
+        assert_eq!(status, SandboxStatus::NotSupported);
+    }
+
+    /// The logged entry point records exactly one `network_filter_apply` event whose
+    /// outcome tracks enforcement: `Denied` when the OS filter is in force (egress
+    /// blocked), `Allowed` otherwise. `detail` always carries the status tag. This
+    /// holds on every build because we assert the invariant, not a specific status.
+    #[test]
+    fn seccomp_logged_records_a_network_filter_event() {
+        let caps = Capabilities::default(); // allow_network = false
+        let mut log = SecurityLog::new();
+        let status = caps.apply_network_filter_logged(&mut log);
+
+        assert_eq!(log.events().len(), 1);
+        let ev = &log.events()[0];
+        assert_eq!(ev.action, SecurityAction::NetworkFilterApply);
+        assert_eq!(ev.detail, status.as_str());
+        if status.is_enforced() {
+            assert_eq!(ev.outcome, SecurityOutcome::Denied);
+            assert_eq!(log.violation_count(), 1);
+        } else {
+            assert_eq!(ev.outcome, SecurityOutcome::Allowed);
+            assert_eq!(log.violation_count(), 0);
+        }
+
+        // The event renders into the JSON trajectory surface with a stable shape.
+        let json = ev.to_json();
+        assert_eq!(json["action"], "network_filter_apply");
+        assert!(json.get("detail").is_some());
+    }
+
+    /// On the real seccomp path, the BPF filter must *compile* (be a non-empty
+    /// program) for the deny-network case. This exercises filter construction
+    /// independently of the kernel install, which may be unavailable in CI. Gated
+    /// on the feature + Linux; a graceful skip everywhere else.
+    #[cfg(all(feature = "seccomp-sandbox", target_os = "linux"))]
+    #[test]
+    fn seccomp_filter_builds_for_deny_network() {
+        let filter = super::seccomp_support::build_filter().expect("filter compiles");
+        // A `BpfProgram` is a `Vec<sock_filter>`; the deny-socket rules must produce
+        // a non-empty program, otherwise `apply_filter` would reject it as empty.
+        assert!(!filter.is_empty());
     }
 }
