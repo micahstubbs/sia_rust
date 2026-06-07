@@ -1862,6 +1862,7 @@ dependencies = [
  "glob",
  "http-body-util",
  "include_dir",
+ "log",
  "mime_guess",
  "regex",
  "reqwest",

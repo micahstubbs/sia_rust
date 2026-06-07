@@ -164,10 +164,15 @@ pub fn run_evaluation_with(
 ) -> Value {
     let evaluate_script = match TaskLayout::new(task_dir, "").evaluate_script() {
         Some(s) => s,
-        None => return json!({"status": "skipped", "reason": "evaluate.py not found"}),
+        None => {
+            log::info!("  → No evaluate.py found in {task_dir}, skipping evaluation");
+            return json!({"status": "skipped", "reason": "evaluate.py not found"});
+        }
     };
+    log::info!("Running evaluation script: {evaluate_script}");
 
     let eval_log_file = format!("{gen_directory}/{}", names::EVAL_LOG);
+    log::info!("  → Evaluation log: {eval_log_file}");
     let python_exec = venv_python_path(venv_dir);
     let cmd = vec![
         python_exec,
@@ -178,9 +183,13 @@ pub fn run_evaluation_with(
 
     match runner(&cmd, config.eval_timeout) {
         EvalOutcome::TimedOut => {
+            log::error!("  ✗ Evaluation timed out after {}s", config.eval_timeout);
             json!({"status": "error", "reason": format!("Evaluation timed out after {}s", config.eval_timeout)})
         }
-        EvalOutcome::SpawnError(e) => json!({"status": "error", "reason": e}),
+        EvalOutcome::SpawnError(e) => {
+            log::error!("  ✗ Unexpected error during evaluation: {e}");
+            json!({"status": "error", "reason": e})
+        }
         EvalOutcome::Completed {
             returncode,
             stdout,
@@ -190,6 +199,7 @@ pub fn run_evaluation_with(
             let _ = std::fs::write(&eval_log_file, &eval_output);
 
             if returncode != 0 {
+                log::error!("  ✗ Evaluation failed with exit code {returncode}");
                 return json!({
                     "status": "error",
                     "reason": format!("evaluate.py exited with code {returncode}"),
@@ -200,6 +210,8 @@ pub fn run_evaluation_with(
 
             let results_json_path = format!("{gen_directory}/{}", names::RESULTS_JSON);
             if Path::new(&results_json_path).exists() {
+                log::info!("  ✓ Evaluation completed successfully");
+                log::info!("  ✓ Results saved to: {results_json_path}");
                 json!({
                     "status": "success",
                     "log_path": eval_log_file,
@@ -207,6 +219,7 @@ pub fn run_evaluation_with(
                     "output": eval_output,
                 })
             } else {
+                log::warn!("  ⚠ Evaluation completed but results.json not found");
                 json!({
                     "status": "warning",
                     "reason": "results.json not created by evaluate.py",
@@ -447,6 +460,9 @@ pub fn run_target_agent_with(
 ) -> (bool, String, String, String) {
     let python_exec = venv_python_path(venv_dir);
 
+    log::info!("Running target agent: {target_agent_path}");
+    log::info!("  → Stdout log: {stdout_log_file}");
+
     let cmd = if sandbox == "docker" {
         build_sandbox_cmd(abs_dataset_dir, gen_dir, env_config)
     } else {
@@ -457,18 +473,25 @@ pub fn run_target_agent_with(
         Ok(return_code) => {
             let stdout = std::fs::read_to_string(stdout_log_file).unwrap_or_default();
             if return_code != 0 {
+                log::error!("  ✗ Target agent execution failed with exit code {return_code}");
+                log::warn!("  → Continuing with feedback agent despite target agent failure");
                 let error_msg = format!("Target agent failed with exit code {return_code}");
                 (false, stdout, String::new(), error_msg)
             } else {
+                log::info!("  ✓ Target agent execution completed successfully");
                 (true, stdout, String::new(), String::new())
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
-            false,
-            String::new(),
-            String::new(),
-            format!("Target agent file not found: {target_agent_path}"),
-        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log::error!("  ✗ Target agent file not found: {target_agent_path}");
+            log::error!("  → Cannot continue.");
+            (
+                false,
+                String::new(),
+                String::new(),
+                format!("Target agent file not found: {target_agent_path}"),
+            )
+        }
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
             let stdout = std::fs::read_to_string(stdout_log_file).unwrap_or_default();
             (false, stdout, String::new(), e.to_string())
@@ -842,6 +865,8 @@ pub fn run_feedback_agent(
     target_provider: &Provider,
     resolved_ref: Option<&ResolvedAgentReference>,
 ) -> SiaResult<()> {
+    log::info!("Running feedback agent for generation {}", args.current_gen);
+    log::info!("Loading agent execution log...");
     let layout = RunLayout::new(args.run_dir.to_string());
     let agent_py =
         std::fs::read_to_string(layout.target_agent(args.current_gen)).unwrap_or_default();
@@ -903,15 +928,23 @@ pub fn run_feedback_agent(
             "failed to write feedback prompt to {feedback_prompt_path}: {e}"
         ))
     })?;
+    log::info!("  ✓ Saved feedback agent prompt to: {feedback_prompt_path}");
 
-    crate::agent_impls::run_agent(
+    let result = crate::agent_impls::run_agent(
         &meta_profile.model,
         &env_config.default_max_turns.to_string(),
         &feedback_prompt,
         args.next_gen_dir,
         &meta_profile.agent_impl,
         Some(meta_profile.provider.clone()),
-    )
+    );
+    if result.is_ok() {
+        log::info!(
+            "Feedback agent completed. Created improved agent for generation {}",
+            args.current_gen + 1
+        );
+    }
+    result
 }
 
 // Re-export TaskFiles to match the Python `from sia.orchestrator import TaskFiles`.

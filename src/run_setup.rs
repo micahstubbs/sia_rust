@@ -28,24 +28,29 @@ pub fn load_task_files(
     shared_dir: &str,
     resolved_ref: Option<&ResolvedAgentReference>,
 ) -> SiaResult<TaskFiles> {
+    log::info!("Loading files from task directory...");
     let paths = TaskLayout::new(task_dir, shared_dir);
 
     let sample_task_descriptions = std::fs::read_to_string(paths.sample_descriptions())
         .map_err(|e| SiaError::new(format!("Could not read sample descriptions: {e}")))?;
+    log::info!("  ✓ Sample task descriptions loaded");
 
     let reference_target_agent_py = match resolved_ref {
         None => std::fs::read_to_string(paths.reference_agent())
             .map_err(|e| SiaError::new(format!("Could not read reference agent: {e}")))?,
         Some(r) => r.inline_seed.clone().unwrap_or_default(),
     };
+    log::info!("  ✓ Reference target agent loaded");
 
     let sample_text = std::fs::read_to_string(paths.sample_execution())
         .map_err(|e| SiaError::new(format!("Could not read sample execution: {e}")))?;
     let sample_agent_execution: serde_json::Value = serde_json::from_str(&sample_text)
         .map_err(|e| SiaError::new(format!("Invalid sample execution JSON: {e}")))?;
+    log::info!("  ✓ Sample agent execution loaded");
 
     let task_md = std::fs::read_to_string(paths.task_md())
         .map_err(|e| SiaError::new(format!("Could not read task.md: {e}")))?;
+    log::info!("  ✓ Task specification loaded");
 
     Ok(TaskFiles {
         sample_task_descriptions,
@@ -114,6 +119,7 @@ fn create_venv(venv_dir: &str, packages: &[&str]) -> SiaResult<()> {
 
 /// Install a requirements.txt into an existing venv (augmenting the baseline packages).
 pub fn install_requirements(venv_dir: &str, requirements_path: &str) -> SiaResult<()> {
+    log::info!("Installing generation dependencies from {requirements_path}");
     let status = if uv_available() {
         Command::new("uv")
             .args([
@@ -188,17 +194,22 @@ pub fn setup_run_directory(
     let meta_agent_working_directory = layout.gen_dir(1);
 
     if Path::new(&run_directory).exists() {
+        log::error!("Run directory already exists: {run_directory}");
+        log::error!("Please use a different run_id or remove the existing directory");
         return Err(SiaError::new(format!(
             "Run directory already exists: {run_directory}. Please use a different run_id or remove the existing directory"
         )));
     }
 
+    log::info!("Creating run directory: {run_directory}");
     std::fs::create_dir_all(&run_directory)
         .map_err(|e| SiaError::new(format!("Could not create run directory: {e}")))?;
+    log::info!("Creating meta_agent working directory: {meta_agent_working_directory}");
     std::fs::create_dir_all(&meta_agent_working_directory)
         .map_err(|e| SiaError::new(format!("Could not create meta agent dir: {e}")))?;
 
     let venv_dir = layout.venv_dir();
+    log::info!("Creating virtual environment at: {venv_dir}");
     create_venv(&venv_dir, Config::VENV_PACKAGES)?;
 
     write_run_profiles(&run_directory, meta_profile, target_profile);
@@ -213,8 +224,10 @@ pub fn setup_run_directory(
     .as_object()
     .unwrap()
     .clone();
+    log::info!("Initializing context manager...");
     let context_mgr = ContextManager::new(&run_directory, run_config, Some(cfg));
     context_mgr.initialize();
+    log::info!("  ✓ Context manager initialized");
 
     Ok(RunSetup {
         run_directory,

@@ -17,6 +17,7 @@ pub mod io_utils;
 pub mod layout;
 #[cfg(feature = "llm")]
 pub mod llm;
+pub mod logging;
 pub mod orchestrator;
 pub mod profiles;
 pub mod prompts;
