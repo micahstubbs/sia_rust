@@ -45,6 +45,15 @@ fn main() {
         Err(e) => e.exit(),
     };
 
+    // Initialize logging before orchestration/web run, honoring the parsed
+    // `--log-level` for the chosen sub-command (previously a no-op flag). Both
+    // `run` and `web` expose `--log-level`; fall back to `$SIA_LOG_LEVEL`/INFO.
+    let cli_level = matches
+        .subcommand()
+        .and_then(|(_, sm)| sm.get_one::<String>("log_level"))
+        .map(|s| s.as_str());
+    sia::logging::init(cli_level);
+
     let result = match matches.subcommand() {
         Some(("web", sm)) => sia::run::run_web(sm),
         Some(("run", sm)) => sia::run::run_orchestrator(sm, &env_config),
