@@ -25,6 +25,37 @@ SIA coordinates three AI agents in a loop. Each generation, the system inspects 
 - Each generation has its own `target_agent.py` and `agent_execution.json`
 - Improvement notes land in `improvement.md` (gen 2 onwards)
 
+## Target execution (the `TargetExecutor` seam)
+
+Target agents are LLM-authored **Python** ML programs; SIA-Rust runs them, it does
+not rewrite them. Per ADR-0001 ("deprecate the Python bridge", issue #138), how a
+target agent is executed sits behind a Rust-native **execution seam** rather than
+being hard-wired into the generation loop.
+
+`src/target_exec.rs` defines a `TargetExecutor` trait — one method that runs a
+single generation and returns the existing `(success, stdout, stderr, error_msg)`
+tuple — with two strategies:
+
+- **`PythonVenvExecutor`** (default): today's behavior. It delegates to
+  `orchestrator::run_target_agent`, covering both the plain per-generation venv
+  subprocess (`python -u target_agent.py --dataset_dir … --working_dir …`) and the
+  Docker-sandboxed path. Byte-for-byte identical to the pre-seam code path.
+- **`NativeExecutor`** (scaffold, `TODO(#138)`): the intended Python-bridge-free
+  path — a capability-confined direct subprocess that drops the per-generation
+  uv/pip venv bridge, confines I/O through the `sandbox` allow-list, and streams
+  output through the same `stream_to_log` contract. **Not** wired as default; it
+  returns a clear "not yet implemented" error if invoked.
+
+The generation loop (`orchestrator::run_generation_with`) keeps its existing
+injectable `target_fn` closure seam (tests depend on it); `target_exec::target_fn_for`
+adapts any `TargetExecutor` into that closure, and `run.rs` defaults to
+`PythonVenvExecutor`. This lets the bridge be hardened or replaced **incrementally**
+without changing the loop, its signatures, or the parity-checked surfaces.
+
+**Roadmap:** flesh out `NativeExecutor` behind the same trait, add offline tests for
+it via the injectable process-runner seam, then flip the default once it reaches
+parity — all without touching `run_generation_with`.
+
 ## Directory layout
 
 ```

@@ -9,12 +9,11 @@ use crate::agent_reference::{copy_reference_into, resolve_agent_reference};
 use crate::config::Config;
 use crate::error::{SiaError, SiaResult};
 use crate::layout::{names, resolve_task_dir, RunLayout, TaskLayout};
-use crate::orchestrator::{
-    run_feedback_agent, run_generation_with, run_target_agent, FeedbackArgs,
-};
+use crate::orchestrator::{run_feedback_agent, run_generation_with, FeedbackArgs};
 use crate::profiles::{load_meta_agent_profile, load_target_agent_profile};
 use crate::prompts::build_meta_prompt;
 use crate::run_setup::{load_task_files, setup_run_directory};
+use crate::target_exec::{target_fn_for, PythonVenvExecutor};
 
 fn opt_str<'a>(m: &'a ArgMatches, key: &str) -> Option<&'a str> {
     m.get_one::<String>(key).map(|s| s.as_str())
@@ -248,10 +247,10 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
     for current_gen in 1..=max_gen {
         println!("Starting Generation {current_gen} of {max_gen}");
 
-        let target_fn =
-            |venv: &str, path: &str, abs_ds: &str, gen: &str, log: &str, sb: &str, cfg: &Config| {
-                run_target_agent(venv, path, abs_ds, gen, log, sb, cfg)
-            };
+        // Route target-agent execution through the `TargetExecutor` seam (#138).
+        // The default strategy is `PythonVenvExecutor`, which delegates to the
+        // existing `run_target_agent` (plain + Docker paths) — behavior unchanged.
+        let target_fn = target_fn_for(&PythonVenvExecutor);
         let mut feedback_fn = |fargs: &FeedbackArgs| {
             run_feedback_agent(
                 fargs,
