@@ -47,6 +47,7 @@ fn test_run_help_exposes_orchestrator_flags() {
         "--meta-agent-profile",
         "--target-agent-profile",
         "--sandbox",
+        "--runs-dir",
     ] {
         assert!(stdout.contains(flag), "missing {flag} in run --help");
     }

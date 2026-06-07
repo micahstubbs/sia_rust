@@ -155,6 +155,11 @@ LLM sampling, outputs will differ between live runs (see
 [Non-determinism](#non-determinism)). The full step-by-step is the
 [reproducibility one-pager](HACKATHON_DECK.md#part-2--reproducibility-one-pager).
 
+To write (and auto-serve) the run under a different root, pass `--runs-dir`
+(or set `SIA_RUNS_DIR`; the flag wins): `cargo run --features llm -- run … --runs-dir /data/sia-runs`.
+The auto-started dashboard serves exactly that directory, and a standalone
+`sia web --runs-dir /data/sia-runs` renders the same tree.
+
 ---
 
 ## 4. Academic reproducibility checklist (for the #70 preprint)

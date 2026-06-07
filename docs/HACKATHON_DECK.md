@@ -291,8 +291,9 @@ cargo run --features llm -- run \
 # Custom port for the dashboard (default: 8000)
 --web-port 9000
 
-# Use a specific run output root
-# (there is no --runs-dir flag for `run`; use the SIA_RUNS_DIR env var if needed)
+# Use a specific run output root (the run writes here AND the dashboard serves it)
+# Flag wins over the SIA_RUNS_DIR env var, which wins over the ./runs default.
+--runs-dir ./my-runs        # or: SIA_RUNS_DIR=./my-runs cargo run -- run ...
 ```
 
 **To run the `arithmetic-mc` example task** (ships with the verifier examples):

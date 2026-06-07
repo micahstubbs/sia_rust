@@ -19,6 +19,7 @@ compatibility, `sia <flags>` with no sub-command is treated as `sia run <flags>`
 | `--meta-agent-profile` | no | `default-meta` | Profile for the meta/feedback agent (name or path to a `.json`) |
 | `--target-agent-profile` | no | `default-target` | Profile for the target agent (name or path to a `.json`) |
 | `--sandbox` | no | `none` | Target-agent isolation: `none` or `docker` |
+| `--runs-dir` | no | `./runs` | Directory where run artifacts are written and served from (also honors `$SIA_RUNS_DIR`; the flag wins) |
 | `--no-web` | no | off | Don't auto-start the live dashboard during the run |
 | `--web-host` | no | `127.0.0.1` | Bind host for the live dashboard |
 | `--web-port` | no | `8000` | Bind port for the live dashboard |
@@ -198,6 +199,21 @@ sia run --task gpqa --max_gen 3 --run_id 2 --target-agent-profile kimi-nebius-ta
 
 Each run lands in its own `runs/run_{id}/` directory, so they can be compared side by side.
 
+### Choosing where runs are written
+
+By default `sia run` writes (and the auto-started dashboard serves) `./runs`. To
+redirect both to another directory, pass `--runs-dir` or set `SIA_RUNS_DIR`
+(the flag wins over the env var, which wins over the `./runs` default):
+
+```bash
+sia run --task gpqa --runs-dir /data/sia-runs      # flag
+SIA_RUNS_DIR=/data/sia-runs sia run --task gpqa    # env var
+```
+
+The background dashboard serves exactly the directory the run writes to, so it
+always reflects the active run. Point a standalone `sia web` at the same place
+with `sia web --runs-dir /data/sia-runs`.
+
 ## Visualizing runs
 
 `sia web` serves a dashboard over the `runs/` directory: per-generation
@@ -219,6 +235,7 @@ run logs a warning and continues without the dashboard.
 
 `SIA_META_PROFILE` / `SIA_TARGET_PROFILE` set the default profile names (overridden by the CLI
 flags). `SIA_MAX_GENERATIONS`, `SIA_MAX_TURNS`, and `SIA_SANDBOX_MODE` are also honored.
+`SIA_RUNS_DIR` sets the default run-output directory for `sia run` (overridden by `--runs-dir`).
 
 ## Notes
 

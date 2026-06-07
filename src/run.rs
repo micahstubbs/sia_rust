@@ -20,6 +20,22 @@ fn opt_str<'a>(m: &'a ArgMatches, key: &str) -> Option<&'a str> {
     m.get_one::<String>(key).map(|s| s.as_str())
 }
 
+/// Resolve the runs root for `sia run`: `--runs-dir` flag wins, then the
+/// `SIA_RUNS_DIR` env var, then the `./runs` default (flag > env > default).
+///
+/// This is intentionally resolved in the CLI/run layer rather than
+/// `Config::from_env` so the parity env map stays byte-for-byte aligned with the
+/// Python reference.
+pub fn resolve_runs_dir(flag: Option<&str>) -> String {
+    if let Some(flag) = flag {
+        return flag.to_string();
+    }
+    match std::env::var("SIA_RUNS_DIR") {
+        Ok(v) if !v.is_empty() => v,
+        _ => names::RUNS_ROOT.to_string(),
+    }
+}
+
 /// `sia web`: serve the runs visualizer (blocks).
 pub fn run_web(args: &ArgMatches) -> SiaResult<()> {
     let host = opt_str(args, "host").unwrap_or("127.0.0.1");
@@ -51,11 +67,14 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
     let (task_dir, shared_dir) =
         resolve_task_dir(opt_str(args, "task"), opt_str(args, "task_dir"))?;
 
-    // Live dashboard in the background unless disabled.
+    let runs_dir = resolve_runs_dir(opt_str(args, "runs_dir"));
+
+    // Live dashboard in the background unless disabled. It serves exactly the
+    // directory the run writes to (`runs_dir`).
     if !args.get_flag("no_web") {
         let web_host = opt_str(args, "web_host").unwrap_or("127.0.0.1");
         let web_port = *args.get_one::<u16>("web_port").unwrap_or(&8000);
-        crate::web::serve_in_background(web_host, web_port, names::RUNS_ROOT);
+        crate::web::serve_in_background(web_host, web_port, &runs_dir);
     }
 
     let meta_profile =
@@ -110,6 +129,7 @@ pub fn run_orchestrator(args: &ArgMatches, env_config: &Config) -> SiaResult<()>
         Some(env_config.clone()),
         Some(&meta_profile),
         Some(&target_profile),
+        &runs_dir,
     )?;
 
     // Section 3: build the initial meta prompt.

@@ -176,6 +176,9 @@ fn write_run_profiles(
 }
 
 /// Create run directories, venv, and context manager.
+///
+/// `runs_root` is the directory under which the `run_<id>` directory is created
+/// (default `./runs`; honors `--runs-dir` / `SIA_RUNS_DIR` resolved by the caller).
 #[allow(clippy::too_many_arguments)]
 pub fn setup_run_directory(
     run_id: i64,
@@ -187,9 +190,10 @@ pub fn setup_run_directory(
     config: Option<Config>,
     meta_profile: Option<&MetaAgentProfile>,
     target_profile: Option<&TargetAgentProfile>,
+    runs_root: &str,
 ) -> SiaResult<RunSetup> {
     let cfg = config.unwrap_or_default();
-    let layout = RunLayout::for_run_id(run_id, crate::layout::names::RUNS_ROOT);
+    let layout = RunLayout::for_run_id(run_id, runs_root);
     let run_directory = layout.run_dir.clone();
     let meta_agent_working_directory = layout.gen_dir(1);
 
