@@ -43,12 +43,21 @@ glob = { version = "0.3", optional = true }
 # `JsonSchema` on `Answer`. Pinned to the same major as rig-core 0.22.0's
 # dependency (schemars 1.x; cache has 1.2.1).
 schemars = { version = "1", optional = true }
+# OS-level filesystem confinement (issue #140, stage 2). Linux-only Landlock LSM
+# bindings; behind the non-default `landlock-sandbox` feature so the default and
+# `llm` builds gain no dependency. The crate compiles on all platforms but its
+# enforcement is a graceful no-op off Linux / on kernels without Landlock.
+landlock = { version = "0.4", optional = true }
 
 [features]
 # Native LLM client (issue #50). Non-default so the published build stays lean.
 # Issue #39 adds the native Claude Anthropic Messages API tool-loop, which pulls
 # in `reqwest` (blocking HTTP transport) and `glob` (the Glob tool executor).
 llm = ["dep:rig-core", "dep:reqwest", "dep:glob", "dep:schemars"]
+# OS-level Landlock filesystem sandbox (issue #140, stage 2). Non-default and
+# Linux-only at runtime; on other platforms / old kernels it degrades to a
+# logged no-op. Kept off the default build so no new dependency is pulled in.
+landlock-sandbox = ["dep:landlock"]
 
 [dev-dependencies]
 tempfile = "3"

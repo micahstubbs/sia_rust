@@ -10,10 +10,13 @@ place today, and the roadmap to OS-level enforcement.
 The framework-track thesis is that the Rust port is *not just faster — it is a
 sounder substrate for safe self-modification*. The honest current state: we have a
 clear threat model, a lexical filesystem sandbox in the native tool layer, an
-optional Docker jail for the Python target agent, and a new pure-`std` **capability
+optional Docker jail for the Python target agent, and a pure-`std` **capability
 allow-list** (`src/sandbox.rs`) that gives tool executors a single, auditable
-enforcement point. Kernel-/VM-level enforcement (landlock, seccomp, WASI) is the
-documented roadmap, not yet shipped.
+enforcement point — now with **structured security-event surfacing** so capability
+violations flow into the trajectory the Feedback Agent reads, and an optional
+**kernel-enforced Landlock filesystem layer** (`landlock-sandbox` feature, Linux,
+graceful no-op elsewhere). The remaining kernel-/VM-level enforcement (seccomp
+network filtering, WASI) is the documented roadmap, not yet shipped.
 
 ---
 
@@ -126,6 +129,32 @@ not be able to reach the assets in §1 beyond an explicit, declared allow-list.*
   This is the single, testable enforcement point on which the OS-level roadmap
   builds. It is **advisory / in-process**: it raises the bar against injection and
   accidental escape but does not constrain a process that ignores it.
+- **Security-event surfacing (`src/sandbox.rs`, this port — issue #140).** The
+  capability layer makes decisions *observable*. `SecurityEvent` records a single
+  capability request (`action` ∈ read/write/bash/size/sandbox_apply) with its
+  `outcome` (allowed/denied) and, on a denial, the `CapabilityError` message as
+  `detail`. `SecurityLog` accumulates events, exposes `violation_count()`, and
+  renders to a JSON array (`to_json`) for embedding into the trajectory /
+  telemetry the Feedback Agent reads. The `Capabilities::check_{read,write,bash}_logged`
+  variants run the identical check and record the outcome in one call. This is
+  pure-`std` on the default build, so observability never depends on the optional
+  OS-enforcement feature. It means a capability *violation* — the signal that an
+  agent attempted something outside its allow-list — becomes a first-class input
+  to the self-improvement loop, not just a silent error string.
+- **OS-level Landlock filesystem confinement (`src/sandbox.rs`, feature
+  `landlock-sandbox` — issue #140).** On Linux, `landlock_support::apply(&caps)`
+  installs a kernel-enforced [Landlock](https://crates.io/crates/landlock) ruleset
+  confining the calling thread (and its future children) to read/write only
+  beneath `caps.fs_root` — read-only when `allow_write` is false. Unlike the
+  in-process allow-list, this **survives a logic bug or prompt-injection that
+  bypasses the `check_*` calls**, because the kernel itself rejects out-of-root
+  opens. It returns a `SandboxStatus` (`Enforced` / `PartiallyEnforced` /
+  `NotSupported`) so the applying layer can record the outcome. It is **off by
+  default** (the default and `llm` builds pull in no new dependency) and
+  **degrades to a logged no-op** on non-Linux targets, on kernels without
+  Landlock, and when the feature is disabled — it never errors and never breaks a
+  run or the CI runner. The companion seccomp network filter (to block raw socket
+  syscalls when `allow_network` is false) remains roadmap (see §6).
 
 ### Honest limitations (today)
 
@@ -136,6 +165,13 @@ not be able to reach the assets in §1 beyond an explicit, declared allow-list.*
 - The lexical sandbox **does not resolve symlinks** (TOCTOU / symlink traversal
   remain possible at the native file-tool layer).
 - The capability layer is in-process and advisory; it is **not** kernel-enforced.
+  Kernel-enforced filesystem confinement is available via the optional
+  `landlock-sandbox` feature (Linux only) but is **not wired into the live native
+  tool loop yet** — `landlock_support::apply` is the enforcement *primitive*;
+  calling it at runner startup is the next integration step.
+- The Landlock layer covers **filesystem** access only. Network egress is still
+  unconfined at the OS level (no seccomp filter yet), so a process with network
+  authority can still exfiltrate; use `--sandbox docker --network none` for that.
 - `--sandbox none` is the default and offers no confinement for the target agent.
 - The Claude SDK runner path uses `permission_mode="bypassPermissions"` (see §7),
   trading interactive approval for automation.
@@ -148,16 +184,15 @@ ignore it:
 
 1. **Capability allow-list — shipped.** `src/sandbox.rs`. Pure `std`, advisory,
    in-process; the policy source of truth.
-2. **OS sandboxing for native execution — planned.** On Linux, apply a
-   [`landlock`](https://crates.io/crates/landlock) filesystem ruleset scoped to
-   `fs_root` (unprivileged, per-thread, kernel-enforced) and a `seccomp` syscall
+2. **OS sandboxing for native execution — partially shipped.** On Linux, the
+   [`landlock`](https://crates.io/crates/landlock) filesystem half is **implemented**
+   in `src/sandbox.rs` (`landlock_support::apply`) behind the non-default
+   `landlock-sandbox` cargo feature, so the default/`llm` builds gain no dependency.
+   It scopes a kernel-enforced ruleset to `fs_root` (unprivileged, per-thread) and
+   degrades to a logged no-op off Linux / on kernels without Landlock. **Still
+   planned:** wiring `apply` into the live runner startup, and the `seccomp` syscall
    filter (e.g. [`seccompiler`](https://crates.io/crates/seccompiler)) to block raw
-   network syscalls when `allow_network` is false. Intended to live behind a
-   non-default `landlock-sandbox` cargo feature so default/`llm` builds gain no
-   dependency. A code sketch is kept in `src/sandbox.rs`; it is not wired in this
-   build because the `landlock` crate is not available in the offline dependency
-   cache (adding it would violate the no-new-mandatory-dep / cache-availability
-   constraint).
+   network syscalls when `allow_network` is false.
 3. **WASI component model — planned.** Run untrusted generated agents as WebAssembly
    components under [`wasmtime`](https://crates.io/crates/wasmtime) with
    [`wasi`](https://crates.io/crates/wasi) preview2 capabilities: only explicit
