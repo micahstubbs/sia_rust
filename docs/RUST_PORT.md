@@ -132,6 +132,77 @@ remain unchanged.
   `Evaluator` with an offline mock adapter (no network/keys) and a real-provider
   path. Run with `cargo test --manifest-path evals/Cargo.toml`; see `evals/README.md`.
 
+## Python-side offline tooling
+
+Some tooling in this repository is **intentionally not reimplemented in Rust**
+because it is offline dataset-preparation work (not part of the `sia run`/`sia web`
+runtime), depends on the Python ML ecosystem (`mlebench`, Kaggle, Google Gemini),
+and the project already bridges to Python for dataset and ML-ecosystem needs. The
+Python module ships in this repo and remains the authority; a thin native
+`Command`-wrapper port could be added later if desired (out of scope for the
+current port effort).
+
+### `sia/prepare_mlebench_dataset.py` — MLE-Bench dataset prep
+
+**Entrypoint:** `python -m sia.prepare_mlebench_dataset`
+
+**Purpose:** Prepares a task directory from an MLE-Bench Kaggle competition so it
+is ready to be consumed by the SIA self-improvement loop. It runs these six steps:
+
+1. `[1/6]` Run `mlebench prepare -c <competition-id>` — downloads and prepares the
+   competition data into the mlebench cache (`~/.cache/mle-bench/data/<competition-id>/prepared/`).
+2. `[2/6]` Copy `prepared/public/` and `prepared/private/` into
+   `<tasks-dir>/<competition-id>/data/public/` and `…/data/private/`.
+3. `[3/6]` Rename `data/public/description.md` → `data/public/task.md` (the
+   filename the SIA orchestrator expects).
+4. `[4/6]` *(optional, skipped with `--skip-gemini`)* Call the Gemini API
+   (`gemini-3-flash-preview`) to synthesize 3–5 diverse similar ML task descriptions
+   from `task.md`, to produce training variety.
+5. `[5/6]` Write `<tasks-dir>/<competition-id>/reference/SAMPLE_TASK_DESCRIPTIONS.md`
+   (Gemini output, or a placeholder when skipped).
+6. `[6/6]` Copy `<tasks-dir>/_shared/reference_target_agent.py` →
+   `<tasks-dir>/<competition-id>/reference/reference_target_agent.py`.
+
+**Flags** (from `argparse`):
+
+| Flag | Default | Description |
+|---|---|---|
+| `-c` / `--competition` | *(required)* | Competition ID, e.g. `spaceship-titanic` |
+| `--tasks-dir` | `./sia/tasks` | Base tasks directory |
+| `--skip-gemini` | off | Skip the Gemini API call (steps 4–5 produce a placeholder) |
+
+**Prerequisites:**
+
+- `mlebench` installed and Kaggle credentials configured (the `mlebench prepare`
+  sub-command downloads competition data; see the
+  [MLE-Bench docs](https://github.com/openai/mle-bench)).
+- `google-generativeai` and `python-dotenv` Python packages (`pip install
+  google-generativeai python-dotenv`).
+- `GEMINI_API_KEY` in your environment or `.env` (see
+  [docs/CREDENTIALS.md](CREDENTIALS.md)). If the key is absent the script warns
+  and produces a placeholder; pass `--skip-gemini` to bypass the step entirely.
+
+**Typical usage:**
+
+```bash
+# Full run (downloads data + generates Gemini similar-task descriptions):
+python -m sia.prepare_mlebench_dataset -c spaceship-titanic
+
+# Offline / no Gemini key (data only):
+python -m sia.prepare_mlebench_dataset -c spaceship-titanic --skip-gemini
+
+# Custom tasks directory:
+python -m sia.prepare_mlebench_dataset -c spaceship-titanic --tasks-dir ./my_tasks --skip-gemini
+```
+
+**Why not reimplemented in Rust:** This is offline dataset-preparation tooling, not
+part of the `sia run`/`sia web` runtime. It depends on `mlebench`, Kaggle
+credentials, and the Google Gemini API — none of which are part of the Rust
+runtime's dependency surface. The project already bridges to Python subprocesses
+for target-agent execution, and native ML-ecosystem tooling belongs on the Python
+side. A thin `std::process::Command` wrapper around this script could be added as a
+future convenience if desired, but it is out of scope for the current port.
+
 ## Testing seams
 
 Where the Python tests patch `subprocess.run` / `subprocess.Popen`, the Rust port

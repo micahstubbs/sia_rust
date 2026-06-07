@@ -128,3 +128,29 @@ python tasks/<task_name>/data/public/evaluate.py --gen-dir runs/run_1/gen_1
 ```
 
 Make sure `results.json` gets created with your metrics!
+
+## MLE-Bench tasks — preparing competition datasets
+
+If you want to use a [MLE-Bench](https://github.com/openai/mle-bench) Kaggle
+competition as a SIA task, this repository ships a Python helper that does the
+full dataset-preparation pipeline:
+
+```bash
+# Full run (downloads data + Gemini similar-task synthesis):
+python -m sia.prepare_mlebench_dataset -c <competition-id>
+
+# Offline / no Gemini key (data only, no API call):
+python -m sia.prepare_mlebench_dataset -c <competition-id> --skip-gemini
+```
+
+The script handles: running `mlebench prepare`, copying public/private data into
+`sia/tasks/<competition-id>/data/`, renaming `description.md` → `task.md`,
+optionally generating similar task descriptions via the Gemini API, and copying
+the shared reference agent. See
+**[docs/RUST_PORT.md — Python-side offline tooling](docs/RUST_PORT.md#python-side-offline-tooling)**
+for the full six-step breakdown, all flag names, prerequisites, and the rationale
+for why this tooling intentionally remains on the Python side.
+
+**Quick prerequisites:** `mlebench` + Kaggle credentials, `google-generativeai`,
+`python-dotenv`, and — unless you pass `--skip-gemini` — a `GEMINI_API_KEY` (see
+[docs/CREDENTIALS.md](docs/CREDENTIALS.md)).

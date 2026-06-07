@@ -111,5 +111,5 @@ the native LLM-runner design, parity/benchmarks/evals, and testing seams.
 - [docs/HACKATHON_DECK.md](docs/HACKATHON_DECK.md) — slide deck outline (7 slides, talking points, one-liners) + reproducibility one-pager.
 - [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) — reproducibility standard: the per-run/per-generation artifact set + schemas, mandatory metadata, the <5-minute offline vs. live verification path, and the academic checklist.
 - [docs/paper/sia_rust_preprint.md](docs/paper/sia_rust_preprint.md) — preprint-style draft paper on the native Rust re-implementation & extensions (system/experience report).
-- [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) — tasks, MLE-Bench, the `evaluate.py` contract.
+- [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) — tasks, MLE-Bench, the `evaluate.py` contract, and preparing MLE-Bench competition datasets (`sia/prepare_mlebench_dataset.py`).
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common issues.
